@@ -1,0 +1,20 @@
+name: library-platform
+
+services:
+  mongodb:
+    image: mongo:8
+    container_name: library-mongodb
+    restart: unless-stopped
+    ports:
+      # Bound to localhost only: the database is not reachable from your network.
+      - '127.0.0.1:27017:27017'
+    volumes:
+      - mongodb-data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongodb-data:
