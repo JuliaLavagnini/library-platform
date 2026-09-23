@@ -38,6 +38,14 @@ export const updateBook: RequestHandler<IdParams> = async (req, res) => {
   res.json(book);
 };
 
+export const borrowCopy: RequestHandler<IdParams> = async (req, res) => {
+  res.json(await bookService.borrowCopy(req.params.id));
+};
+
+export const returnCopy: RequestHandler<IdParams> = async (req, res) => {
+  res.json(await bookService.returnCopy(req.params.id));
+};
+
 export const deleteBook: RequestHandler<IdParams> = async (req, res) => {
   await bookService.deleteBook(req.params.id);
   res.status(204).end();

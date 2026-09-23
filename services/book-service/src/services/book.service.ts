@@ -71,6 +71,42 @@ export async function updateBook(id: string, input: UpdateBookInput) {
   return book.save();
 }
 
+// Borrow and return use a single atomic update: the availability check and the change
+// happen together in MongoDB, so two concurrent requests can never take the same last copy.
+// Bumping __v makes any stale read-then-save (e.g. updateBook) fail instead of
+// overwriting the new count.
+export async function borrowCopy(id: string) {
+  if (!isValidObjectId(id)) {
+    throw new NotFoundError(`Book ${id} not found`);
+  }
+
+  const book = await BookModel.findOneAndUpdate(
+    { _id: id, availableCopies: { $gt: 0 } },
+    { $inc: { availableCopies: -1, __v: 1 } },
+    { returnDocument: 'after' },
+  );
+  if (book) return book;
+
+  await getBook(id); // Throws 404 if the book does not exist.
+  throw new ConflictError(`No copies of book ${id} are available`);
+}
+
+export async function returnCopy(id: string) {
+  if (!isValidObjectId(id)) {
+    throw new NotFoundError(`Book ${id} not found`);
+  }
+
+  const book = await BookModel.findOneAndUpdate(
+    { _id: id, $expr: { $lt: ['$availableCopies', '$totalCopies'] } },
+    { $inc: { availableCopies: 1, __v: 1 } },
+    { returnDocument: 'after' },
+  );
+  if (book) return book;
+
+  await getBook(id);
+  throw new ConflictError(`All copies of book ${id} are already on the shelf`);
+}
+
 export async function deleteBook(id: string) {
   const book = await getBook(id);
   if (book.availableCopies < book.totalCopies) {
