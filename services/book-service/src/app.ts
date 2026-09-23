@@ -4,6 +4,8 @@ import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
 import { env } from './config/env.ts';
 import { logger } from './config/logger.ts';
+import { errorHandler, notFoundHandler } from './middlewares/error-handler.ts';
+import { bookRouter } from './routes/book.routes.ts';
 import { healthRouter } from './routes/health.routes.ts';
 
 export function createApp() {
@@ -16,6 +18,11 @@ export function createApp() {
   app.use(pinoHttp({ logger }));
 
   app.use('/health', healthRouter);
+  app.use('/api/books', bookRouter);
+
+  // Must be registered last.
+  app.use(notFoundHandler);
+  app.use(errorHandler);
 
   return app;
 }
