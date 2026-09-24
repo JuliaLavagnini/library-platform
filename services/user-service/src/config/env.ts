@@ -8,6 +8,9 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(8081),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   CORS_ORIGIN: z.string().default('*'),
+  // Number of proxies in front of this service (e.g. 1 behind the API gateway). Lets
+  // Express read the real client IP from X-Forwarded-For. 0 = connected directly.
+  TRUST_PROXY: z.coerce.number().int().min(0).default(0),
   MONGODB_URI: z.url().default('mongodb://localhost:27017/users'),
   BOOK_SERVICE_URL: z.url().default('http://localhost:8080'),
   BOOK_SERVICE_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),

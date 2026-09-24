@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
 import { env } from './config/env.ts';
 import { logger } from './config/logger.ts';
+import { requestId } from './middlewares/request-id.ts';
 import type { JWTVerifyGetKey } from 'jose';
 import { createAuth, remoteKeySet } from './middlewares/auth.ts';
 import { errorHandler, notFoundHandler } from './middlewares/error-handler.ts';
@@ -22,6 +23,7 @@ export function createApp({ keySet = remoteKeySet() }: AppOptions = {}) {
   const auth = createAuth(keySet);
 
   app.disable('x-powered-by');
+  app.set('trust proxy', env.TRUST_PROXY);
   app.use(
     helmet({
       // The service speaks plain HTTP inside Docker/Kubernetes (TLS ends at the gateway),
@@ -34,6 +36,7 @@ export function createApp({ keySet = remoteKeySet() }: AppOptions = {}) {
   app.use(
     pinoHttp({
       logger,
+      genReqId: requestId,
       // Health checks run every few seconds; logging them would bury real traffic.
       autoLogging: { ignore: (req) => req.url?.startsWith('/health') ?? false },
     }),
