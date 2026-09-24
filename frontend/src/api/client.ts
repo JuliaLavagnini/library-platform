@@ -37,8 +37,12 @@ const authMiddleware: Middleware = {
 // openapi-fetch needs an absolute URL; in the browser that's this page's origin.
 const baseUrl = globalThis.location?.origin ?? 'http://localhost';
 
-export const booksApi = createClient<BookPaths>({ baseUrl });
-export const usersApi = createClient<UserPaths>({ baseUrl });
+// Look fetch up on every request rather than once at startup, so anything that wraps it
+// later (like the test suite's fake API) is used.
+const fetchNow: typeof fetch = (input, init) => globalThis.fetch(input, init);
+
+export const booksApi = createClient<BookPaths>({ baseUrl, fetch: fetchNow });
+export const usersApi = createClient<UserPaths>({ baseUrl, fetch: fetchNow });
 booksApi.use(authMiddleware);
 usersApi.use(authMiddleware);
 

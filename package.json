@@ -23,9 +23,9 @@
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
-    "test:watch": "vitest --project \"*:unit\"",
+    "test:watch": "vitest --project \"*:unit\" --project web",
     "test:coverage": "vitest run --coverage",
-    "test:unit": "vitest run --project \"*:unit\"",
+    "test:unit": "vitest run --project \"*:unit\" --project web",
     "test:integration": "vitest run --project \"*:integration\"",
     "keys:generate": "node scripts/generate-jwt-key.ts",
     "test:e2e": "node --env-file-if-exists=.env scripts/e2e.ts",
@@ -47,6 +47,7 @@
   "allowScripts": {
     "protobufjs": false,
     "ssh2": false,
-    "@scarf/scarf": false
+    "@scarf/scarf": false,
+    "msw": false
   }
 }
