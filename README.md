@@ -1,7 +1,7 @@
 # Online Library Platform
 
-A microservices library system for managing books, members and loans. It is built with
-TypeScript, Express and MongoDB and runs in Docker. Over time it will grow into a complete
+A microservices library system for managing books, members and loans, with a React web
+app. It is built with TypeScript, Express and MongoDB and runs in Docker. Over time it will grow into a complete
 platform covering DevOps, data engineering and MLOps.
 
 ## About this project
@@ -27,7 +27,8 @@ After the module, I **rebuilt it from scratch** as a portfolio project with thre
 | Language           | Java 21, Spring Boot                                                               | TypeScript (Node.js 24), Express 5                                                    |
 | Credentials        | Database password hard-coded in config files and Kubernetes YAML                   | Read from the environment, never committed                                            |
 | Authentication     | None: anyone could call any endpoint, including deleting books and users           | Login with JWTs, member and librarian roles, and service-to-service tokens            |
-| Tests              | Only the default "does the app start" test                                         | About 200 unit, integration, concurrency and access tests                             |
+| Tests              | Only the default "does the app start" test                                         | About 240 unit, integration, concurrency, access and frontend tests                   |
+| Frontend           | Plain HTML and JavaScript calling each service directly on hard-coded IP addresses | React and TypeScript app with API types generated from the OpenAPI docs, one origin   |
 | Borrowing a book   | The **browser** called both services in turn and undid step one if step two failed | The **User Service** coordinates with the Book Service and undoes step one on failure |
 | Concurrent borrows | Read, check, then save, so two people could take the last copy                     | One atomic database update, tested with simultaneous requests                         |
 | Updating a book    | Missing fields were set to `null`, and available copies never updated              | Partial updates (`PATCH`), and available copies adjust correctly                      |
@@ -41,8 +42,9 @@ After the module, I **rebuilt it from scratch** as a portfolio project with thre
 
 ```mermaid
 flowchart LR
-    client([Client]) -->|":8000"| gateway[API Gateway<br/>nginx]
+    client([Browser]) -->|":8000"| gateway[API Gateway<br/>nginx]
     subgraph internal["Internal network"]
+        gateway -->|"/ (pages)"| web[Web app<br/>React, nginx]
         gateway -->|/api/books| book[Book Service]
         gateway -->|"/api/auth, /api/users, /api/loans"| user[User Service]
         user -->|"borrow / return a copy (service token)"| book
@@ -55,6 +57,7 @@ flowchart LR
 | Component        | Responsibility                                                                            | Port                              |
 | ---------------- | ----------------------------------------------------------------------------------------- | --------------------------------- |
 | **API Gateway**  | The single entry point: routing, rate limiting, request IDs, hiding internal endpoints    | **8000** (the only one published) |
+| **Web app**      | The React frontend, built to static files and served by nginx                             | 8080 (internal)                   |
 | **Book Service** | Book catalogue and copy availability                                                      | 8080 (internal)                   |
 | **User Service** | Accounts, login and loans. Issues tokens and coordinates borrowing with the Book Service. | 8081 (internal)                   |
 | **MongoDB**      | Separate `books` and `users` databases, one per service                                   | 27017 (localhost only)            |
@@ -64,7 +67,8 @@ flowchart LR
 Clients only ever talk to the gateway, an nginx container. The services have no published
 ports, so they can't be reached from outside the Docker network. The gateway:
 
-- **Routes** each path to the right service, and serves both services' docs side by side.
+- **Routes** each path to the right service: API calls to the services, and every other
+  path to the web app. It also serves both services' docs side by side.
 - **Hides internal endpoints.** `/api/books/:id/borrow` and `/return` are only for the User
   Service, which calls the Book Service directly on the internal network. The gateway
   returns 404 for them, on top of the Book Service's own access check.
@@ -121,12 +125,16 @@ with events (Kafka and the transactional outbox pattern) to close that gap.
 ## Tech stack
 
 - **Runtime:** Node.js 24, TypeScript (strict), run directly by Node in development
+- **Web app:** React 19, TypeScript, Vite, React Router, TanStack Query, a typed API client
+  (`openapi-fetch`, with types generated by `openapi-typescript`), plain CSS with light
+  and dark mode
 - **API:** Express 5, Zod validation, Helmet, CORS, rate limiting
 - **Auth:** JWT (EdDSA / Ed25519) with `jose`, Argon2id password hashing, JWKS
 - **API docs:** OpenAPI 3.1 generated from the Zod schemas, Swagger UI
 - **Data:** MongoDB 8, Mongoose 9
 - **Logging:** pino, with readable output in development and JSON in production
-- **Testing:** Vitest, Supertest, Testcontainers (a real MongoDB per test run)
+- **Testing:** Vitest, Supertest, Testcontainers (a real MongoDB per test run), and Testing
+  Library with Mock Service Worker for the web app
 - **Containers:** Docker multi-stage builds, Docker Compose
 - **Code quality:** ESLint, Prettier, npm workspaces
 
@@ -153,13 +161,18 @@ Paste the `JWT_PRIVATE_KEY=...` line that the second command prints into `.env`,
 npm run docker:up
 ```
 
-This builds the services and the gateway and starts them with MongoDB. Everything is
-reached through the gateway at **http://localhost:8000**. Check that it's up, then run
-the end-to-end tests, which log in, borrow and return a book, and clean up after
-themselves:
+This builds the services, the web app and the gateway and starts them with MongoDB.
+Add some sample books, then open the app at **http://localhost:8000**:
 
 ```bash
-curl http://localhost:8000/health
+npm run seed
+```
+
+Log in as the librarian from your `.env` to manage books, loans and members, or sign up
+as a member to borrow. To check everything works, run the end-to-end tests. They log in,
+borrow and return a book, and clean up after themselves:
+
+```bash
 npm run test:e2e
 ```
 
@@ -183,6 +196,23 @@ npm run dev -w @library/user-service
 
 If you want to change a setting, copy a service's `.env.example` to `.env` and edit it.
 
+### Work on the web app
+
+With the Docker stack running, start the frontend's dev server. It reloads as you save,
+and forwards API calls to the gateway, so the browser talks to one origin just like in
+production:
+
+```bash
+npm run dev -w @library/web
+```
+
+Then open http://localhost:5173. If a service's API changes, regenerate the frontend's
+types from the OpenAPI documents. Anything that no longer matches then fails to compile:
+
+```bash
+npm run api:generate -w @library/web
+```
+
 ### API docs
 
 Each service serves interactive docs, generated from the same Zod schemas that validate
@@ -200,20 +230,21 @@ its docs are at `/docs` and the raw spec at `/openapi.json`.
 | Command                    | What it does                                                     |
 | -------------------------- | ---------------------------------------------------------------- |
 | `npm test`                 | Run all tests (needs Docker for the integration tests)           |
-| `npm run test:unit`        | Unit tests only, no Docker needed (under a second)               |
+| `npm run test:unit`        | Unit and web app tests, no Docker needed (a few seconds)         |
 | `npm run test:integration` | API tests against a real MongoDB in a throwaway container        |
 | `npm run test:e2e`         | End-to-end checks against the running stack, through the gateway |
 | `npm run test:watch`       | Re-run unit tests as you save                                    |
 | `npm run test:coverage`    | Show which lines the tests cover                                 |
+| `npm run seed`             | Add sample books to the catalogue (skips ones that exist)        |
 | `npm run keys:generate`    | Print a new token-signing key for `.env`                         |
-| `npm run typecheck`        | Type-check every service                                         |
+| `npm run typecheck`        | Type-check every service and the web app                         |
 | `npm run lint`             | Run ESLint                                                       |
 | `npm run format`           | Format all files with Prettier                                   |
-| `npm run build`            | Compile every service to `dist/`                                 |
+| `npm run build`            | Compile every service and the web app to `dist/`                 |
 
 ## Testing
 
-About 200 tests cover both services, at around 95% line coverage:
+About 240 tests cover both services and the web app, at over 90% line coverage:
 
 - **Unit tests** check validation rules, token signing and verification, and the Book
   Service client with a faked `fetch`.
@@ -228,6 +259,10 @@ About 200 tests cover both services, at around 95% line coverage:
   expired and unsigned (`alg: none`) tokens.
 - **A docs test** fails if an endpoint is added without being documented, or documented
   without existing.
+- **Web app tests** render the whole app the way a user sees it (Testing Library) against
+  a fake API at the network level (Mock Service Worker), so the real API client runs.
+  They cover browsing, borrowing and returning, login redirects, the API's validation
+  messages, automatic logout on an expired token, and the librarian pages.
 - **End-to-end checks** (`npm run test:e2e`) run the whole flow against the real stack
   through the gateway, including checks on the gateway itself.
 
@@ -354,7 +389,8 @@ library-platform/
 │   │       ├── unit/        # no database needed
 │   │       └── integration/ # real MongoDB via Testcontainers
 │   └── user-service/        # Accounts, login and loans (same layout, plus clients/ for the Book Service)
-├── scripts/                 # helper scripts, e.g. generating a signing key
+├── frontend/                # React web app (Vite), its tests, Dockerfile and nginx config
+├── scripts/                 # seed data, end-to-end checks, signing-key generator
 ├── Dockerfile               # one multi-stage build shared by all services
 ├── gateway/                 # nginx API gateway (config and Dockerfile)
 ├── docker-compose.yml       # the full stack for local development
@@ -367,12 +403,12 @@ library-platform/
 
 - [x] **Phase 0: Foundation.** TypeScript rebuild, validation, error handling, a safe
       borrowing flow, Docker and Docker Compose.
-- [ ] **Phase 1: Software engineering.**
+- [x] **Phase 1: Software engineering.**
   - [x] Unit and integration tests (Vitest, Testcontainers)
   - [x] OpenAPI docs and Swagger UI
   - [x] Authentication and access rules (JWT, Argon2id, JWKS)
   - [x] An API gateway (nginx)
-  - [ ] A web frontend
+  - [x] A web frontend (React, TypeScript, Vite)
 - [ ] **Phase 2: DevOps.** CI/CD with GitHub Actions, Kubernetes (Helm and Argo CD),
       Terraform and Azure, and observability (Prometheus, Grafana, OpenTelemetry).
 - [ ] **Phase 3: Data engineering.** Kafka events with the transactional outbox pattern, a
