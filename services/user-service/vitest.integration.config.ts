@@ -12,6 +12,7 @@ export default defineProject({
     env: {
       NODE_ENV: 'test',
       LOG_LEVEL: 'silent',
+      AUTH_RATE_LIMIT_PER_MINUTE: '1000',
     },
   },
 });

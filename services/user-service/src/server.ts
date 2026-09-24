@@ -2,6 +2,7 @@ import { createApp } from './app.ts';
 import { connectDatabase, disconnectDatabase } from './config/database.ts';
 import { env } from './config/env.ts';
 import { logger } from './config/logger.ts';
+import { ensureBootstrapLibrarian } from './services/auth.service.ts';
 
 try {
   await connectDatabase(env.MONGODB_URI);
@@ -9,6 +10,8 @@ try {
   logger.fatal(err, 'could not connect to MongoDB');
   process.exit(1);
 }
+
+await ensureBootstrapLibrarian(env.BOOTSTRAP_LIBRARIAN_EMAIL, env.BOOTSTRAP_LIBRARIAN_PASSWORD);
 
 const app = createApp();
 

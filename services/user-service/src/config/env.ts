@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+// Docker Compose passes unset variables as empty strings; treat them as missing.
+const blankAsUndefined = (value: unknown) => (value === '' ? undefined : value);
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(8081),
@@ -9,6 +12,18 @@ const envSchema = z.object({
   BOOK_SERVICE_URL: z.url().default('http://localhost:8080'),
   BOOK_SERVICE_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
   LOAN_PERIOD_DAYS: z.coerce.number().int().positive().default(14),
+
+  // Authentication
+  // Ed25519 private key (PKCS#8 PEM) used to sign tokens. "\n" escapes are allowed so the
+  // key fits on one line in a .env file. If unset, a temporary key is generated at startup.
+  JWT_PRIVATE_KEY: z.preprocess(blankAsUndefined, z.string().optional()),
+  JWT_ISSUER: z.string().default('library-platform/user-service'),
+  JWT_AUDIENCE: z.string().default('library-platform'),
+  ACCESS_TOKEN_TTL_MINUTES: z.coerce.number().int().positive().default(15),
+  AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(10),
+  // Creates the first librarian account on startup if no librarian exists yet.
+  BOOTSTRAP_LIBRARIAN_EMAIL: z.preprocess(blankAsUndefined, z.email().optional()),
+  BOOTSTRAP_LIBRARIAN_PASSWORD: z.preprocess(blankAsUndefined, z.string().min(12).optional()),
 });
 
 export type Env = z.infer<typeof envSchema>;

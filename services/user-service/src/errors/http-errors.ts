@@ -8,6 +8,20 @@ export class HttpError extends Error {
   }
 }
 
+// Not logged in, or the token is invalid or expired.
+export class UnauthorizedError extends HttpError {
+  constructor(message = 'Authentication required') {
+    super(401, message);
+  }
+}
+
+// Logged in, but not allowed to do this.
+export class ForbiddenError extends HttpError {
+  constructor(message = 'You do not have permission to do this') {
+    super(403, message);
+  }
+}
+
 export class NotFoundError extends HttpError {
   constructor(message = 'Resource not found') {
     super(404, message);

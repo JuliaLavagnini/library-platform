@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { createDocument, type ZodOpenApiResponseObject } from 'zod-openapi';
+import { loginSchema, registerSchema } from '../schemas/auth.schemas.ts';
 import { borrowBookSchema, listLoansQuerySchema } from '../schemas/loan.schemas.ts';
 import {
   createUserSchema,
@@ -17,6 +18,7 @@ const userSchema = z
     name: z.string().meta({ example: 'Ada Lovelace' }),
     email: z.string().meta({ example: 'ada@example.com' }),
     membershipId: z.string().meta({ example: 'MBR-64760B5F' }),
+    role: z.enum(['member', 'librarian']),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   })
@@ -41,6 +43,21 @@ const loanSchema = z
   })
   .meta({ id: 'Loan' });
 
+const tokenFields = {
+  accessToken: z.string().meta({ description: 'Send as "Authorization: Bearer <token>"' }),
+  tokenType: z.literal('Bearer'),
+  expiresIn: z
+    .number()
+    .int()
+    .meta({ description: 'Seconds until the token expires', example: 900 }),
+};
+
+const authResultSchema = z.object({ user: userSchema, ...tokenFields }).meta({ id: 'AuthResult' });
+
+const jwksSchema = z
+  .object({ keys: z.array(z.record(z.string(), z.string())) })
+  .meta({ id: 'JsonWebKeySet' });
+
 const errorSchema = z
   .object({
     error: z.object({
@@ -64,6 +81,8 @@ const errors = {
   badRequest: json('Invalid input', errorSchema),
   notFound: (description: string) => json(description, errorSchema),
   conflict: (description: string) => json(description, errorSchema),
+  unauthorized: json('Missing, invalid or expired token', errorSchema),
+  tooManyRequests: json('Too many attempts from this IP. Try again in a minute.', errorSchema),
   badGateway: json('book-service sent an unexpected response', errorSchema),
   unavailable: json('book-service could not be reached. Nothing was changed.', errorSchema),
 };
@@ -76,8 +95,56 @@ export const openApiDocument = createDocument({
     description:
       'Manages library members and their loans. Borrowing and returning are coordinated with book-service.',
   },
-  tags: [{ name: 'Users' }, { name: 'Loans' }, { name: 'Health' }],
+  tags: [{ name: 'Auth' }, { name: 'Users' }, { name: 'Loans' }, { name: 'Health' }],
+  components: {
+    securitySchemes: {
+      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+    },
+  },
   paths: {
+    '/api/auth/register': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Sign up as a member',
+        description: 'Creates a member account and logs it in.',
+        requestBody: { content: { 'application/json': { schema: registerSchema } } },
+        responses: {
+          '201': json('The new member and an access token', authResultSchema),
+          '400': errors.badRequest,
+          '409': errors.conflict('An account with this email already exists'),
+          '429': errors.tooManyRequests,
+        },
+      },
+    },
+    '/api/auth/login': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Log in',
+        requestBody: { content: { 'application/json': { schema: loginSchema } } },
+        responses: {
+          '200': json('The member and an access token', authResultSchema),
+          '400': errors.badRequest,
+          '401': json('Invalid email or password', errorSchema),
+          '429': errors.tooManyRequests,
+        },
+      },
+    },
+    '/api/auth/me': {
+      get: {
+        tags: ['Auth'],
+        summary: 'Get the logged-in account',
+        security: [{ bearerAuth: [] }],
+        responses: { '200': json('The account', userSchema), '401': errors.unauthorized },
+      },
+    },
+    '/.well-known/jwks.json': {
+      get: {
+        tags: ['Auth'],
+        summary: 'Public keys for verifying tokens',
+        description: 'Other services use these to check that a token was issued by user-service.',
+        responses: { '200': json('JSON Web Key Set', jwksSchema) },
+      },
+    },
     '/api/users': {
       get: {
         tags: ['Users'],

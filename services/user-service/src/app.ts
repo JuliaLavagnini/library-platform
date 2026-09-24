@@ -5,6 +5,7 @@ import { pinoHttp } from 'pino-http';
 import { env } from './config/env.ts';
 import { logger } from './config/logger.ts';
 import { errorHandler, notFoundHandler } from './middlewares/error-handler.ts';
+import { authRouter, jwksRouter } from './routes/auth.routes.ts';
 import { docsRouter } from './routes/docs.routes.ts';
 import { healthRouter } from './routes/health.routes.ts';
 import { loanRouter } from './routes/loan.routes.ts';
@@ -32,6 +33,8 @@ export function createApp() {
   );
 
   app.use('/health', healthRouter);
+  app.use('/api/auth', authRouter);
+  app.use(jwksRouter);
   app.use('/api/users', userRouter);
   app.use('/api/loans', loanRouter);
   app.use(docsRouter);

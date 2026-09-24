@@ -39,6 +39,10 @@ export const notFoundHandler: RequestHandler = (req, res) => {
 
 export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
   if (err instanceof HttpError) {
+    if (err.status === 401) {
+      // Tells clients which authentication scheme to use (RFC 6750).
+      res.setHeader('WWW-Authenticate', 'Bearer');
+    }
     res.status(err.status).json(errorBody(err.message));
     return;
   }

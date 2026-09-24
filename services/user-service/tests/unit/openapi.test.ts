@@ -3,6 +3,7 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app.ts';
 import { openApiDocument } from '../../src/docs/openapi.ts';
+import { authRouter, jwksRouter } from '../../src/routes/auth.routes.ts';
 import { loanRouter } from '../../src/routes/loan.routes.ts';
 import { userRouter } from '../../src/routes/user.routes.ts';
 import { healthRouter } from '../../src/routes/health.routes.ts';
@@ -32,6 +33,8 @@ function documentedOperations() {
 describe('OpenAPI document', () => {
   it('documents exactly the routes the app serves', () => {
     const served = [
+      ...operationsOf(authRouter, '/api/auth'),
+      ...operationsOf(jwksRouter, ''),
       ...operationsOf(userRouter, '/api/users'),
       ...operationsOf(loanRouter, '/api/loans'),
       ...operationsOf(healthRouter, '/health'),

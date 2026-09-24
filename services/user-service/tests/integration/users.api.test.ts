@@ -7,9 +7,10 @@ import { LoanModel } from '../../src/models/loan.model.ts';
 const app = createApp();
 
 const unknownId = '6ab463346d7baeb8a9d25a57';
+const password = 'correct horse battery staple';
 
 async function createUser(name = 'Ada Lovelace', email = 'ada@example.com') {
-  const res = await request(app).post('/api/users').send({ name, email }).expect(201);
+  const res = await request(app).post('/api/users').send({ name, email, password }).expect(201);
   return res.body as { id: string; membershipId: string };
 }
 
@@ -24,10 +25,15 @@ describe('POST /api/users', () => {
   it('registers a member with a generated membership ID', async () => {
     const res = await request(app)
       .post('/api/users')
-      .send({ name: '  Ada Lovelace ', email: ' Ada@Example.COM ' })
+      .send({ name: '  Ada Lovelace ', email: ' Ada@Example.COM ', password })
       .expect(201);
 
-    expect(res.body).toMatchObject({ name: 'Ada Lovelace', email: 'ada@example.com' });
+    expect(res.body).toMatchObject({
+      name: 'Ada Lovelace',
+      email: 'ada@example.com',
+      role: 'member',
+    });
+    expect(res.body).not.toHaveProperty('passwordHash');
     expect(res.body.membershipId).toMatch(/^MBR-[0-9A-F]{8}$/);
     expect(res.headers.location).toBe(`/api/users/${res.body.id}`);
   });
@@ -42,7 +48,7 @@ describe('POST /api/users', () => {
     await createUser();
     const res = await request(app)
       .post('/api/users')
-      .send({ name: 'Someone Else', email: 'ADA@example.com' })
+      .send({ name: 'Someone Else', email: 'ADA@example.com', password })
       .expect(409);
     expect(res.body.error.message).toBe('A record with this email already exists');
   });

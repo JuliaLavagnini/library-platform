@@ -36,7 +36,10 @@ afterEach(() => {
 });
 
 async function createUser(email = 'ada@example.com') {
-  const res = await request(app).post('/api/users').send({ name: 'Member', email }).expect(201);
+  const res = await request(app)
+    .post('/api/users')
+    .send({ name: 'Member', email, password: 'correct horse battery staple' })
+    .expect(201);
   return res.body.id as string;
 }
 

@@ -3,6 +3,7 @@ import { LoanModel } from '../models/loan.model.ts';
 import { UserModel } from '../models/user.model.ts';
 import { ConflictError, NotFoundError } from '../errors/http-errors.ts';
 import type { CreateUserInput, UpdateUserInput } from '../schemas/user.schemas.ts';
+import { hashPassword } from './password.service.ts';
 
 export interface ListUsersFilter {
   search?: string;
@@ -32,8 +33,8 @@ export async function getUser(id: string) {
   return user;
 }
 
-export async function createUser(input: CreateUserInput) {
-  return UserModel.create(input);
+export async function createUser({ password, ...input }: CreateUserInput) {
+  return UserModel.create({ ...input, passwordHash: await hashPassword(password) });
 }
 
 export async function updateUser(id: string, input: UpdateUserInput) {
