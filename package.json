@@ -26,7 +26,8 @@
     "test:coverage": "vitest run --coverage",
     "test:unit": "vitest run --project \"*:unit\"",
     "test:integration": "vitest run --project \"*:integration\"",
-    "keys:generate": "node scripts/generate-jwt-key.ts"
+    "keys:generate": "node scripts/generate-jwt-key.ts",
+    "test:e2e": "node --env-file-if-exists=.env scripts/e2e.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
