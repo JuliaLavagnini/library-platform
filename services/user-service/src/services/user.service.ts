@@ -1,6 +1,7 @@
 import { isValidObjectId } from 'mongoose';
+import { LoanModel } from '../models/loan.model.ts';
 import { UserModel } from '../models/user.model.ts';
-import { NotFoundError } from '../errors/http-errors.ts';
+import { ConflictError, NotFoundError } from '../errors/http-errors.ts';
 import type { CreateUserInput, UpdateUserInput } from '../schemas/user.schemas.ts';
 
 export interface ListUsersFilter {
@@ -46,5 +47,9 @@ export async function updateUser(id: string, input: UpdateUserInput) {
 
 export async function deleteUser(id: string) {
   const user = await getUser(id);
+  // Loan history is kept for records and analytics; only active loans block deletion.
+  if (await LoanModel.exists({ userId: user._id, status: 'active' })) {
+    throw new ConflictError(`Cannot delete user ${id}: they still have books on loan`);
+  }
   await user.deleteOne();
 }
