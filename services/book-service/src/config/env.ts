@@ -5,7 +5,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(8080),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   CORS_ORIGIN: z.string().default('*'),
-  MONGODB_URI: z.url().default('mongodb://localhost:27017/library'),
+  MONGODB_URI: z.url().default('mongodb://localhost:27017/books'),
 });
 
 export type Env = z.infer<typeof envSchema>;
