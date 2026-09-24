@@ -2,28 +2,33 @@ import request from 'supertest';
 import { Types } from 'mongoose';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app.ts';
+import { bearer } from './support/auth.ts';
 import { LoanModel } from '../../src/models/loan.model.ts';
 
 const app = createApp();
+
+// These tests cover behaviour, so they act as a librarian, who may do everything.
+// The access rules themselves are tested in access.api.test.ts.
+const api = request.agent(app).set('Authorization', await bearer('librarian'));
 
 const unknownId = '6ab463346d7baeb8a9d25a57';
 const password = 'correct horse battery staple';
 
 async function createUser(name = 'Ada Lovelace', email = 'ada@example.com') {
-  const res = await request(app).post('/api/users').send({ name, email, password }).expect(201);
+  const res = await api.post('/api/users').send({ name, email, password }).expect(201);
   return res.body as { id: string; membershipId: string };
 }
 
 describe('health checks', () => {
   it('reports readiness when the database is connected', async () => {
-    const res = await request(app).get('/health/ready').expect(200);
+    const res = await api.get('/health/ready').expect(200);
     expect(res.body).toEqual({ status: 'ready', checks: { database: 'up' } });
   });
 });
 
 describe('POST /api/users', () => {
   it('registers a member with a generated membership ID', async () => {
-    const res = await request(app)
+    const res = await api
       .post('/api/users')
       .send({ name: '  Ada Lovelace ', email: ' Ada@Example.COM ', password })
       .expect(201);
@@ -46,7 +51,7 @@ describe('POST /api/users', () => {
 
   it('rejects an email that is already registered, whatever its case', async () => {
     await createUser();
-    const res = await request(app)
+    const res = await api
       .post('/api/users')
       .send({ name: 'Someone Else', email: 'ADA@example.com', password })
       .expect(409);
@@ -54,7 +59,7 @@ describe('POST /api/users', () => {
   });
 
   it('rejects invalid input', async () => {
-    const res = await request(app).post('/api/users').send({ email: 'nope' }).expect(400);
+    const res = await api.post('/api/users').send({ email: 'nope' }).expect(400);
     expect(res.body.error.details.map((d: { path: string }) => d.path)).toEqual(
       expect.arrayContaining(['name', 'email']),
     );
@@ -66,7 +71,7 @@ describe('GET /api/users', () => {
     await createUser('Grace Hopper', 'grace@example.com');
     await createUser();
 
-    const res = await request(app).get('/api/users').expect(200);
+    const res = await api.get('/api/users').expect(200);
 
     expect(res.body.map((u: { name: string }) => u.name)).toEqual(['Ada Lovelace', 'Grace Hopper']);
   });
@@ -75,9 +80,9 @@ describe('GET /api/users', () => {
     const ada = await createUser();
     await createUser('Alan Turing', 'alan@example.com');
 
-    const byName = await request(app).get('/api/users?search=lovelace').expect(200);
-    const byEmail = await request(app).get('/api/users?search=alan@').expect(200);
-    const byMembership = await request(app).get(`/api/users?search=${ada.membershipId}`);
+    const byName = await api.get('/api/users?search=lovelace').expect(200);
+    const byEmail = await api.get('/api/users?search=alan@').expect(200);
+    const byMembership = await api.get(`/api/users?search=${ada.membershipId}`);
 
     expect(byName.body).toHaveLength(1);
     expect(byEmail.body[0].name).toBe('Alan Turing');
@@ -88,11 +93,11 @@ describe('GET /api/users', () => {
 describe('GET /api/users/:id', () => {
   it('returns the member', async () => {
     const { id } = await createUser();
-    await request(app).get(`/api/users/${id}`).expect(200);
+    await api.get(`/api/users/${id}`).expect(200);
   });
 
   it.each([unknownId, 'not-an-id'])('returns 404 for %s', async (id) => {
-    await request(app).get(`/api/users/${id}`).expect(404);
+    await api.get(`/api/users/${id}`).expect(404);
   });
 });
 
@@ -100,7 +105,7 @@ describe('PATCH /api/users/:id', () => {
   it('changes only the fields sent and never the membership ID', async () => {
     const ada = await createUser();
 
-    const res = await request(app)
+    const res = await api
       .patch(`/api/users/${ada.id}`)
       .send({ name: 'Augusta Ada King' })
       .expect(200);
@@ -114,17 +119,14 @@ describe('PATCH /api/users/:id', () => {
 
   it('rejects an attempt to change the membership ID', async () => {
     const { id } = await createUser();
-    await request(app).patch(`/api/users/${id}`).send({ membershipId: 'MBR-HACKED00' }).expect(400);
+    await api.patch(`/api/users/${id}`).send({ membershipId: 'MBR-HACKED00' }).expect(400);
   });
 
   it("rejects taking another member's email", async () => {
     await createUser();
     const alan = await createUser('Alan Turing', 'alan@example.com');
 
-    await request(app)
-      .patch(`/api/users/${alan.id}`)
-      .send({ email: 'ada@example.com' })
-      .expect(409);
+    await api.patch(`/api/users/${alan.id}`).send({ email: 'ada@example.com' }).expect(409);
   });
 });
 
@@ -132,8 +134,8 @@ describe('DELETE /api/users/:id', () => {
   it('deletes a member with no books on loan', async () => {
     const { id } = await createUser();
 
-    await request(app).delete(`/api/users/${id}`).expect(204);
-    await request(app).get(`/api/users/${id}`).expect(404);
+    await api.delete(`/api/users/${id}`).expect(204);
+    await api.get(`/api/users/${id}`).expect(404);
   });
 
   it('refuses to delete a member who still has a book on loan', async () => {
@@ -145,7 +147,7 @@ describe('DELETE /api/users/:id', () => {
       dueAt: new Date(Date.now() + 86_400_000),
     });
 
-    const res = await request(app).delete(`/api/users/${id}`).expect(409);
+    const res = await api.delete(`/api/users/${id}`).expect(409);
 
     expect(res.body.error.message).toMatch(/still have books on loan/);
   });
@@ -161,6 +163,6 @@ describe('DELETE /api/users/:id', () => {
       returnedAt: new Date(),
     });
 
-    await request(app).delete(`/api/users/${id}`).expect(204);
+    await api.delete(`/api/users/${id}`).expect(204);
   });
 });

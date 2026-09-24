@@ -82,10 +82,31 @@ const errors = {
   notFound: (description: string) => json(description, errorSchema),
   conflict: (description: string) => json(description, errorSchema),
   unauthorized: json('Missing, invalid or expired token', errorSchema),
+  forbidden: (description: string) => json(description, errorSchema),
   tooManyRequests: json('Too many attempts from this IP. Try again in a minute.', errorSchema),
   badGateway: json('book-service sent an unexpected response', errorSchema),
   unavailable: json('book-service could not be reached. Nothing was changed.', errorSchema),
 };
+
+// Access rules, shown on each protected operation.
+const bearer = [{ bearerAuth: [] }];
+
+const librarianOnly = {
+  security: bearer,
+  'x-access': 'Librarians only',
+};
+
+const selfOrLibrarian = {
+  security: bearer,
+  'x-access': 'The member themselves, or any librarian',
+};
+
+function authErrors(who: string) {
+  return {
+    '401': errors.unauthorized,
+    '403': errors.forbidden(`Not allowed: ${who.toLowerCase()}`),
+  };
+}
 
 export const openApiDocument = createDocument({
   openapi: '3.1.0',
@@ -149,17 +170,21 @@ export const openApiDocument = createDocument({
       get: {
         tags: ['Users'],
         summary: 'List members',
+        ...librarianOnly,
         requestParams: { query: listUsersQuerySchema },
         responses: {
+          ...authErrors(librarianOnly['x-access']),
           '200': json('Members sorted by name', z.array(userSchema)),
           '400': errors.badRequest,
         },
       },
       post: {
         tags: ['Users'],
-        summary: 'Register a member',
+        summary: 'Create an account (as a librarian)',
+        ...librarianOnly,
         requestBody: { content: { 'application/json': { schema: createUserSchema } } },
         responses: {
+          ...authErrors(librarianOnly['x-access']),
           '201': json('The new member, with a generated membership ID', userSchema),
           '400': errors.badRequest,
           '409': errors.conflict('A member with this email already exists'),
@@ -170,8 +195,10 @@ export const openApiDocument = createDocument({
       get: {
         tags: ['Users'],
         summary: 'Get a member',
+        ...selfOrLibrarian,
         requestParams: { path: userParams },
         responses: {
+          ...authErrors(selfOrLibrarian['x-access']),
           '200': json('The member', userSchema),
           '404': errors.notFound('Member not found'),
         },
@@ -179,9 +206,11 @@ export const openApiDocument = createDocument({
       patch: {
         tags: ['Users'],
         summary: "Update a member's name or email",
+        ...selfOrLibrarian,
         requestParams: { path: userParams },
         requestBody: { content: { 'application/json': { schema: updateUserSchema } } },
         responses: {
+          ...authErrors(selfOrLibrarian['x-access']),
           '200': json('The updated member', userSchema),
           '400': errors.badRequest,
           '404': errors.notFound('Member not found'),
@@ -191,9 +220,11 @@ export const openApiDocument = createDocument({
       delete: {
         tags: ['Users'],
         summary: 'Delete a member',
+        ...librarianOnly,
         description: 'Loan history is kept. Members with books still on loan cannot be deleted.',
         requestParams: { path: userParams },
         responses: {
+          ...authErrors(librarianOnly['x-access']),
           '204': { description: 'Deleted' },
           '404': errors.notFound('Member not found'),
           '409': errors.conflict('The member still has books on loan'),
@@ -204,8 +235,10 @@ export const openApiDocument = createDocument({
       get: {
         tags: ['Loans'],
         summary: "List a member's loans",
+        ...selfOrLibrarian,
         requestParams: { path: userParams, query: listLoansQuerySchema },
         responses: {
+          ...authErrors(selfOrLibrarian['x-access']),
           '200': json('Loans, most recent first', z.array(loanSchema)),
           '400': errors.badRequest,
           '404': errors.notFound('Member not found'),
@@ -214,11 +247,13 @@ export const openApiDocument = createDocument({
       post: {
         tags: ['Loans'],
         summary: 'Borrow a book',
+        ...selfOrLibrarian,
         description:
           'Takes a copy from book-service, then records the loan. If recording fails, the copy is handed back.',
         requestParams: { path: userParams },
         requestBody: { content: { 'application/json': { schema: borrowBookSchema } } },
         responses: {
+          ...authErrors(selfOrLibrarian['x-access']),
           '201': json('The new loan', loanSchema),
           '400': errors.badRequest,
           '404': errors.notFound('Member or book not found'),
@@ -234,10 +269,12 @@ export const openApiDocument = createDocument({
       post: {
         tags: ['Loans'],
         summary: 'Return a loan',
+        ...selfOrLibrarian,
         description:
           'Closes the loan, then puts the copy back in book-service. If that fails, the loan is reopened so it can be retried.',
         requestParams: { path: loanParams },
         responses: {
+          ...authErrors(selfOrLibrarian['x-access']),
           '200': json('The returned loan', loanSchema),
           '404': errors.notFound('Loan not found for this member'),
           '409': errors.conflict('The loan has already been returned'),
@@ -250,9 +287,11 @@ export const openApiDocument = createDocument({
       get: {
         tags: ['Loans'],
         summary: 'List loans across all members',
+        ...librarianOnly,
         description: 'Use ?status=overdue for the librarian view of late books.',
         requestParams: { query: listLoansQuerySchema },
         responses: {
+          ...authErrors(librarianOnly['x-access']),
           '200': json('Loans, most recent first', z.array(loanSchema)),
           '400': errors.badRequest,
         },

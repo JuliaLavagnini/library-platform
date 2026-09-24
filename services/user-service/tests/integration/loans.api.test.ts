@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../src/app.ts';
+import { bearer } from './support/auth.ts';
 import { ServiceUnavailableError } from '../../src/errors/http-errors.ts';
 import { LoanModel } from '../../src/models/loan.model.ts';
 import { FakeBookService } from './support/fake-book-service.ts';
@@ -17,6 +18,10 @@ vi.mock('../../src/clients/book.client.ts', () => ({
 const bookClient = await import('../../src/clients/book.client.ts');
 
 const app = createApp();
+
+// These tests cover behaviour, so they act as a librarian, who may do everything.
+// The access rules themselves are tested in access.api.test.ts.
+const api = request.agent(app).set('Authorization', await bearer('librarian'));
 const books = new FakeBookService();
 bookService.current = books;
 
@@ -36,7 +41,7 @@ afterEach(() => {
 });
 
 async function createUser(email = 'ada@example.com') {
-  const res = await request(app)
+  const res = await api
     .post('/api/users')
     .send({ name: 'Member', email, password: 'correct horse battery staple' })
     .expect(201);
@@ -44,7 +49,7 @@ async function createUser(email = 'ada@example.com') {
 }
 
 async function borrow(userId: string, bookId: string, status = 201) {
-  const res = await request(app).post(`/api/users/${userId}/loans`).send({ bookId }).expect(status);
+  const res = await api.post(`/api/users/${userId}/loans`).send({ bookId }).expect(status);
   return res.body as { id: string; borrowedAt: string; dueAt: string; error?: { message: string } };
 }
 
@@ -103,7 +108,7 @@ describe('borrowing a book', () => {
 
   it('rejects a bookId that is not an id', async () => {
     const userId = await createUser();
-    await request(app).post(`/api/users/${userId}/loans`).send({ bookId: '../admin' }).expect(400);
+    await api.post(`/api/users/${userId}/loans`).send({ bookId: '../admin' }).expect(400);
   });
 });
 
@@ -112,7 +117,7 @@ describe('returning a book', () => {
     const userId = await createUser();
     const loan = await borrow(userId, cleanCode);
 
-    const res = await request(app).post(`/api/users/${userId}/loans/${loan.id}/return`).expect(200);
+    const res = await api.post(`/api/users/${userId}/loans/${loan.id}/return`).expect(200);
 
     expect(res.body).toMatchObject({ status: 'returned', overdue: false });
     expect(res.body.returnedAt).not.toBeNull();
@@ -122,9 +127,9 @@ describe('returning a book', () => {
   it('refuses to return the same loan twice', async () => {
     const userId = await createUser();
     const loan = await borrow(userId, cleanCode);
-    await request(app).post(`/api/users/${userId}/loans/${loan.id}/return`).expect(200);
+    await api.post(`/api/users/${userId}/loans/${loan.id}/return`).expect(200);
 
-    await request(app).post(`/api/users/${userId}/loans/${loan.id}/return`).expect(409);
+    await api.post(`/api/users/${userId}/loans/${loan.id}/return`).expect(409);
 
     expect(books.availableCopies(cleanCode)).toBe(2);
   });
@@ -134,18 +139,18 @@ describe('returning a book', () => {
     const alan = await createUser('alan@example.com');
     const loan = await borrow(ada, cleanCode);
 
-    await request(app).post(`/api/users/${alan}/loans/${loan.id}/return`).expect(404);
+    await api.post(`/api/users/${alan}/loans/${loan.id}/return`).expect(404);
   });
 
   it('returns 404 for a malformed loan id', async () => {
     const userId = await createUser();
-    await request(app).post(`/api/users/${userId}/loans/abc/return`).expect(404);
+    await api.post(`/api/users/${userId}/loans/abc/return`).expect(404);
   });
 
   it('allows borrowing the same book again after returning it', async () => {
     const userId = await createUser();
     const loan = await borrow(userId, cleanCode);
-    await request(app).post(`/api/users/${userId}/loans/${loan.id}/return`).expect(200);
+    await api.post(`/api/users/${userId}/loans/${loan.id}/return`).expect(200);
 
     await borrow(userId, cleanCode);
   });
@@ -155,13 +160,13 @@ describe('listing loans', () => {
   it("filters a member's loans by status, including overdue", async () => {
     const userId = await createUser();
     const returned = await borrow(userId, cleanCode);
-    await request(app).post(`/api/users/${userId}/loans/${returned.id}/return`).expect(200);
+    await api.post(`/api/users/${userId}/loans/${returned.id}/return`).expect(200);
     const late = await borrow(userId, refactoring);
     await LoanModel.updateOne({ _id: late.id }, { dueAt: new Date('2026-01-01') });
 
-    const all = await request(app).get(`/api/users/${userId}/loans`).expect(200);
-    const active = await request(app).get(`/api/users/${userId}/loans?status=active`).expect(200);
-    const overdue = await request(app).get(`/api/users/${userId}/loans?status=overdue`).expect(200);
+    const all = await api.get(`/api/users/${userId}/loans`).expect(200);
+    const active = await api.get(`/api/users/${userId}/loans?status=active`).expect(200);
+    const overdue = await api.get(`/api/users/${userId}/loans?status=overdue`).expect(200);
 
     expect(all.body).toHaveLength(2);
     expect(active.body.map((l: { id: string }) => l.id)).toEqual([late.id]);
@@ -169,7 +174,7 @@ describe('listing loans', () => {
   });
 
   it("returns 404 for an unknown member's loans", async () => {
-    await request(app).get(`/api/users/${unknownId}/loans`).expect(404);
+    await api.get(`/api/users/${unknownId}/loans`).expect(404);
   });
 
   it('lists overdue loans across all members', async () => {
@@ -179,7 +184,7 @@ describe('listing loans', () => {
     const late = await borrow(alan, refactoring);
     await LoanModel.updateOne({ _id: late.id }, { dueAt: new Date('2026-01-01') });
 
-    const res = await request(app).get('/api/loans?status=overdue').expect(200);
+    const res = await api.get('/api/loans?status=overdue').expect(200);
 
     expect(res.body).toMatchObject([{ id: late.id, userId: alan }]);
   });
@@ -226,13 +231,13 @@ describe('keeping both services consistent', () => {
       new ServiceUnavailableError('Book service is unavailable, please try again later'),
     );
 
-    await request(app).post(`/api/users/${userId}/loans/${loan.id}/return`).expect(503);
+    await api.post(`/api/users/${userId}/loans/${loan.id}/return`).expect(503);
 
     const reopened = await LoanModel.findById(loan.id);
     expect(reopened).toMatchObject({ status: 'active', returnedAt: null });
     expect(books.availableCopies(cleanCode)).toBe(1);
 
-    await request(app).post(`/api/users/${userId}/loans/${loan.id}/return`).expect(200);
+    await api.post(`/api/users/${userId}/loans/${loan.id}/return`).expect(200);
     expect(books.availableCopies(cleanCode)).toBe(2);
   });
 
@@ -241,7 +246,7 @@ describe('keeping both services consistent', () => {
 
     const responses = await Promise.all(
       Array.from({ length: 6 }, () =>
-        request(app).post(`/api/users/${userId}/loans`).send({ bookId: refactoring }),
+        api.post(`/api/users/${userId}/loans`).send({ bookId: refactoring }),
       ),
     );
 
