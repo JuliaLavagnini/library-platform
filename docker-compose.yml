@@ -4,6 +4,9 @@ name: library-platform
 #   docker compose up -d --build     start (rebuilding images after code changes)
 #   docker compose logs -f           follow logs
 #   docker compose down              stop (data is kept in the mongodb-data volume)
+#
+# Everything is reached through the gateway at http://localhost:8000. The services have no
+# published ports: they're only reachable from inside the Compose network.
 
 services:
   mongodb:
@@ -35,8 +38,8 @@ services:
       MONGODB_URI: mongodb://mongodb:27017/books
       # Public keys for verifying login tokens, fetched from user-service when first needed.
       JWKS_URL: http://user-service:8081/.well-known/jwks.json
-    ports:
-      - '8080:8080'
+      # One proxy (the gateway) in front: read the client IP from X-Forwarded-For.
+      TRUST_PROXY: 1
     depends_on:
       mongodb:
         condition: service_healthy
@@ -59,12 +62,25 @@ services:
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
       BOOTSTRAP_LIBRARIAN_EMAIL: ${BOOTSTRAP_LIBRARIAN_EMAIL:-}
       BOOTSTRAP_LIBRARIAN_PASSWORD: ${BOOTSTRAP_LIBRARIAN_PASSWORD:-}
-    ports:
-      - '8081:8081'
+      # One proxy (the gateway) in front: needed so login rate limits count each client.
+      TRUST_PROXY: 1
     depends_on:
       mongodb:
         condition: service_healthy
       book-service:
+        condition: service_healthy
+
+  gateway:
+    build: ./gateway
+    image: library-platform/gateway:dev
+    container_name: library-gateway
+    restart: unless-stopped
+    ports:
+      - '8000:8080'
+    depends_on:
+      book-service:
+        condition: service_healthy
+      user-service:
         condition: service_healthy
 
 volumes:
