@@ -46,11 +46,13 @@ export async function borrowBook(userId: string, bookId: string) {
   const book = await bookClient.borrowBookCopy(bookId);
 
   try {
+    const borrowedAt = new Date();
     return await LoanModel.create({
       userId,
       bookId,
       bookTitle: book.title,
-      dueAt: new Date(Date.now() + env.LOAN_PERIOD_DAYS * DAY_MS),
+      borrowedAt,
+      dueAt: new Date(borrowedAt.getTime() + env.LOAN_PERIOD_DAYS * DAY_MS),
     });
   } catch (err) {
     await bookClient.returnBookCopy(bookId).catch((compensationErr: unknown) => {
