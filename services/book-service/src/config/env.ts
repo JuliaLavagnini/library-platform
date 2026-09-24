@@ -6,6 +6,12 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   CORS_ORIGIN: z.string().default('*'),
   MONGODB_URI: z.url().default('mongodb://localhost:27017/books'),
+
+  // Authentication: tokens are issued by user-service; this service only verifies them
+  // using the public keys user-service publishes.
+  JWKS_URL: z.url().default('http://localhost:8081/.well-known/jwks.json'),
+  JWT_ISSUER: z.string().default('library-platform/user-service'),
+  JWT_AUDIENCE: z.string().default('library-platform'),
 });
 
 export type Env = z.infer<typeof envSchema>;

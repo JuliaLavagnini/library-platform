@@ -1,14 +1,27 @@
 import { Router } from 'express';
 import * as bookController from '../controllers/book.controller.ts';
+import type { Auth } from '../middlewares/auth.ts';
 
-export const bookRouter = Router();
+export function createBookRouter({ authenticate, requireRole }: Auth) {
+  const router = Router();
 
-bookRouter.get('/', bookController.listBooks);
-bookRouter.post('/', bookController.createBook);
-bookRouter.get('/:id', bookController.getBook);
-bookRouter.patch('/:id', bookController.updateBook);
-bookRouter.delete('/:id', bookController.deleteBook);
+  // Anyone can browse the catalogue.
+  router.get('/', bookController.listBooks);
+  router.get('/:id', bookController.getBook);
 
-// Actions, not updates: POST because each call changes state (not idempotent).
-bookRouter.post('/:id/borrow', bookController.borrowCopy);
-bookRouter.post('/:id/return', bookController.returnCopy);
+  // Only librarians manage the catalogue.
+  const librarian = [authenticate, requireRole('librarian')];
+  router.post('/', librarian, bookController.createBook);
+  router.patch('/:id', librarian, bookController.updateBook);
+  router.delete('/:id', librarian, bookController.deleteBook);
+
+  // Taking and returning copies happens only as part of a loan, so only user-service
+  // may call these. A member calling them directly could change copy counts
+  // without a loan being recorded.
+  // Actions, not updates: POST because each call changes state (not idempotent).
+  const service = [authenticate, requireRole('service')];
+  router.post('/:id/borrow', service, bookController.borrowCopy);
+  router.post('/:id/return', service, bookController.returnCopy);
+
+  return router;
+}

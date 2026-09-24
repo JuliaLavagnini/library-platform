@@ -4,13 +4,22 @@ import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
 import { env } from './config/env.ts';
 import { logger } from './config/logger.ts';
+import type { JWTVerifyGetKey } from 'jose';
+import { createAuth, remoteKeySet } from './middlewares/auth.ts';
 import { errorHandler, notFoundHandler } from './middlewares/error-handler.ts';
-import { bookRouter } from './routes/book.routes.ts';
+import { createBookRouter } from './routes/book.routes.ts';
 import { docsRouter } from './routes/docs.routes.ts';
 import { healthRouter } from './routes/health.routes.ts';
 
-export function createApp() {
+export interface AppOptions {
+  // Where public keys for verifying tokens come from. Defaults to user-service's JWKS
+  // endpoint; tests pass their own keys.
+  keySet?: JWTVerifyGetKey;
+}
+
+export function createApp({ keySet = remoteKeySet() }: AppOptions = {}) {
   const app = express();
+  const auth = createAuth(keySet);
 
   app.disable('x-powered-by');
   app.use(
@@ -31,7 +40,7 @@ export function createApp() {
   );
 
   app.use('/health', healthRouter);
-  app.use('/api/books', bookRouter);
+  app.use('/api/books', createBookRouter(auth));
   app.use(docsRouter);
 
   // Must be registered last.

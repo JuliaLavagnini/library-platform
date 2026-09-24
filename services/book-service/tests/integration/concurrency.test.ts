@@ -1,20 +1,27 @@
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../src/app.ts';
+import { bearer, testKeySet } from '../support/auth.ts';
 import { BookModel } from '../../src/models/book.model.ts';
 import * as bookService from '../../src/services/book.service.ts';
 
 // These tests prove the guarantees that the coursework version got wrong:
 // copy counts stay correct when many requests arrive at the same time.
 
-const app = createApp();
+const app = createApp({ keySet: testKeySet });
+
+// These tests cover behaviour, so they use the role each endpoint expects: librarians
+// manage books, user-service takes and returns copies. Access rules are tested in
+// access.api.test.ts.
+const asLibrarian = request.agent(app).set('Authorization', await bearer('librarian'));
+const asService = request.agent(app).set('Authorization', await bearer('service'));
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 async function createBook(totalCopies: number) {
-  const res = await request(app)
+  const res = await asLibrarian
     .post('/api/books')
     .send({ isbn: '9780135957059', title: 'Clean Code', author: 'Robert C. Martin', totalCopies })
     .expect(201);
@@ -33,7 +40,7 @@ describe('concurrent borrowing', () => {
     const id = await createBook(3);
 
     const responses = await Promise.all(
-      Array.from({ length: 10 }, () => request(app).post(`/api/books/${id}/borrow`)),
+      Array.from({ length: 10 }, () => asService.post(`/api/books/${id}/borrow`)),
     );
 
     expect(statusCounts(responses)).toEqual({ 200: 3, 409: 7 });
@@ -43,11 +50,11 @@ describe('concurrent borrowing', () => {
 
   it('never returns more copies than were lent', async () => {
     const id = await createBook(3);
-    await request(app).post(`/api/books/${id}/borrow`).expect(200);
-    await request(app).post(`/api/books/${id}/borrow`).expect(200);
+    await asService.post(`/api/books/${id}/borrow`).expect(200);
+    await asService.post(`/api/books/${id}/borrow`).expect(200);
 
     const responses = await Promise.all(
-      Array.from({ length: 5 }, () => request(app).post(`/api/books/${id}/return`)),
+      Array.from({ length: 5 }, () => asService.post(`/api/books/${id}/return`)),
     );
 
     expect(statusCounts(responses)).toEqual({ 200: 2, 409: 3 });
@@ -79,7 +86,7 @@ describe('edits that race with a borrow', () => {
     // landed between the edit's read and its save.
     vi.spyOn(BookModel, 'findById').mockReturnValueOnce(Promise.resolve(staleCopy) as never);
 
-    const res = await request(app).patch(`/api/books/${id}`).send({ totalCopies: 4 }).expect(409);
+    const res = await asLibrarian.patch(`/api/books/${id}`).send({ totalCopies: 4 }).expect(409);
 
     expect(res.body.error.message).toMatch(/changed by another request/);
   });

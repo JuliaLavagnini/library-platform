@@ -46,7 +46,26 @@ const errors = {
   badRequest: json('Invalid input', errorSchema),
   notFound: json('Book not found', errorSchema),
   conflict: (description: string) => json(description, errorSchema),
+  unauthorized: json('Missing, invalid or expired token', errorSchema),
+  forbidden: (description: string) => json(description, errorSchema),
 };
+
+// Access rules, shown on each protected operation.
+const bearer = [{ bearerAuth: [] }];
+
+const librarianOnly = { security: bearer, 'x-access': 'Librarians only' };
+
+const serviceOnly = {
+  security: bearer,
+  'x-access': 'user-service only (as part of a loan)',
+};
+
+function authErrors(who: string) {
+  return {
+    '401': errors.unauthorized,
+    '403': errors.forbidden(`Not allowed: ${who.charAt(0).toLowerCase()}${who.slice(1)}`),
+  };
+}
 
 export const openApiDocument = createDocument({
   openapi: '3.1.0',
@@ -56,6 +75,16 @@ export const openApiDocument = createDocument({
     description: "Manages the library's book inventory and copy availability.",
   },
   tags: [{ name: 'Books' }, { name: 'Copies' }, { name: 'Health' }],
+  components: {
+    securitySchemes: {
+      bearerAuth: {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        description: 'A token from user-service: POST /api/auth/login',
+      },
+    },
+  },
   paths: {
     '/api/books': {
       get: {
@@ -70,8 +99,10 @@ export const openApiDocument = createDocument({
       post: {
         tags: ['Books'],
         summary: 'Add a book',
+        ...librarianOnly,
         requestBody: { content: { 'application/json': { schema: createBookSchema } } },
         responses: {
+          ...authErrors(librarianOnly['x-access']),
           '201': json('The new book, with every copy available', bookSchema),
           '400': errors.badRequest,
           '409': errors.conflict('A book with this ISBN already exists'),
@@ -88,9 +119,11 @@ export const openApiDocument = createDocument({
       patch: {
         tags: ['Books'],
         summary: 'Update some fields of a book',
+        ...librarianOnly,
         requestParams: { path: idParams },
         requestBody: { content: { 'application/json': { schema: updateBookSchema } } },
         responses: {
+          ...authErrors(librarianOnly['x-access']),
           '200': json('The updated book', bookSchema),
           '400': errors.badRequest,
           '404': errors.notFound,
@@ -102,8 +135,10 @@ export const openApiDocument = createDocument({
       delete: {
         tags: ['Books'],
         summary: 'Delete a book',
+        ...librarianOnly,
         requestParams: { path: idParams },
         responses: {
+          ...authErrors(librarianOnly['x-access']),
           '204': { description: 'Deleted' },
           '404': errors.notFound,
           '409': errors.conflict('Copies are on loan'),
@@ -114,10 +149,12 @@ export const openApiDocument = createDocument({
       post: {
         tags: ['Copies'],
         summary: 'Take one copy off the shelf',
+        ...serviceOnly,
         description:
           'Atomic: two requests can never take the same last copy. Normally called by user-service when a member borrows a book.',
         requestParams: { path: idParams },
         responses: {
+          ...authErrors(serviceOnly['x-access']),
           '200': json('The book with one fewer copy available', bookSchema),
           '404': errors.notFound,
           '409': errors.conflict('No copies are available'),
@@ -128,8 +165,10 @@ export const openApiDocument = createDocument({
       post: {
         tags: ['Copies'],
         summary: 'Put one copy back on the shelf',
+        ...serviceOnly,
         requestParams: { path: idParams },
         responses: {
+          ...authErrors(serviceOnly['x-access']),
           '200': json('The book with one more copy available', bookSchema),
           '404': errors.notFound,
           '409': errors.conflict('Every copy is already on the shelf'),

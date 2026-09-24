@@ -3,7 +3,9 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app.ts';
 import { openApiDocument } from '../../src/docs/openapi.ts';
-import { bookRouter } from '../../src/routes/book.routes.ts';
+import { createAuth } from '../../src/middlewares/auth.ts';
+import { createBookRouter } from '../../src/routes/book.routes.ts';
+import { testKeySet } from '../support/auth.ts';
 import { healthRouter } from '../../src/routes/health.routes.ts';
 
 interface RouteLayer {
@@ -31,7 +33,7 @@ function documentedOperations() {
 describe('OpenAPI document', () => {
   it('documents exactly the routes the app serves', () => {
     const served = [
-      ...operationsOf(bookRouter, '/api/books'),
+      ...operationsOf(createBookRouter(createAuth(testKeySet)), '/api/books'),
       ...operationsOf(healthRouter, '/health'),
     ];
 
