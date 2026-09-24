@@ -22,8 +22,10 @@
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:watch": "vitest --project \"*:unit\"",
+    "test:coverage": "vitest run --coverage",
+    "test:unit": "vitest run --project \"*:unit\"",
+    "test:integration": "vitest run --project \"*:integration\""
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -36,5 +38,9 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.70.1",
     "vitest": "^5.0.1"
+  },
+  "allowScripts": {
+    "protobufjs": false,
+    "ssh2": false
   }
 }
