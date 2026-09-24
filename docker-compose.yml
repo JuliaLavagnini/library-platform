@@ -70,6 +70,14 @@ services:
       book-service:
         condition: service_healthy
 
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: library-platform/web:dev
+    container_name: library-web
+    restart: unless-stopped
+
   gateway:
     build: ./gateway
     image: library-platform/gateway:dev
@@ -81,6 +89,8 @@ services:
       book-service:
         condition: service_healthy
       user-service:
+        condition: service_healthy
+      web:
         condition: service_healthy
 
 volumes:

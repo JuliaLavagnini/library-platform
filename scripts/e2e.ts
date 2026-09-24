@@ -66,7 +66,22 @@ check(
   Boolean(health.headers.get('x-request-id')),
   true,
 );
-check('unknown paths return 404', (await call('GET', '/nothing-here')).status, 404);
+check('unknown API paths return 404', (await call('GET', '/api/nothing-here')).status, 404);
+
+// --- Web app ---
+const home = await call('GET', '/');
+check('the web app is served', home.status, 200);
+check(
+  'the web app has a Content Security Policy',
+  Boolean(home.headers.get('content-security-policy')),
+  true,
+);
+const appRoute = await call('GET', '/librarian/members');
+check(
+  "the app's own routes load the app",
+  appRoute.status === 200 && String(appRoute.body).includes('<div id="root">'),
+  true,
+);
 check('book docs are served', (await call('GET', '/docs/books/')).status, 200);
 check('user docs are served', (await call('GET', '/docs/users/')).status, 200);
 check('public keys are served', (await call('GET', '/.well-known/jwks.json')).status, 200);

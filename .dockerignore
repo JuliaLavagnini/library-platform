@@ -13,7 +13,6 @@
 .vscode
 docs
 infra
-frontend
 scripts
 **/tests
 Dockerfile
