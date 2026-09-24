@@ -1,16 +1,7 @@
 import { isValidObjectId } from 'mongoose';
 import { BookModel } from '../models/book.model.ts';
 import { ConflictError, NotFoundError } from '../errors/http-errors.ts';
-
-export interface CreateBookInput {
-  isbn: string;
-  title: string;
-  author: string;
-  genre?: string;
-  totalCopies: number;
-}
-
-export type UpdateBookInput = Partial<CreateBookInput>;
+import type { CreateBookInput, UpdateBookInput } from '../schemas/book.schemas.ts';
 
 export interface ListBooksFilter {
   search?: string;

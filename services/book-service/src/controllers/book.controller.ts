@@ -1,17 +1,19 @@
 import type { RequestHandler } from 'express';
+import {
+  createBookSchema,
+  listBooksQuerySchema,
+  updateBookSchema,
+} from '../schemas/book.schemas.ts';
 import * as bookService from '../services/book.service.ts';
 
 type IdParams = { id: string };
 
-export const listBooks: RequestHandler = async (req, res) => {
-  const search = typeof req.query.search === 'string' ? req.query.search : undefined;
-  const availableOnly = req.query.available === 'true';
+// Each handler parses its input with a Zod schema. Invalid input throws a ZodError,
+// which the error handler turns into a 400 response.
 
-  const books = await bookService.listBooks({
-    ...(search !== undefined && { search }),
-    availableOnly,
-  });
-  res.json(books);
+export const listBooks: RequestHandler = async (req, res) => {
+  const { search, available } = listBooksQuerySchema.parse(req.query);
+  res.json(await bookService.listBooks({ search, availableOnly: available }));
 };
 
 export const getBook: RequestHandler<IdParams> = async (req, res) => {
@@ -19,23 +21,14 @@ export const getBook: RequestHandler<IdParams> = async (req, res) => {
 };
 
 export const createBook: RequestHandler = async (req, res) => {
-  // Only pick known fields so clients can't set availableCopies or _id directly.
-  // Full request validation is added with Zod in a later step.
-  const { isbn, title, author, genre, totalCopies } = req.body ?? {};
-  const book = await bookService.createBook({ isbn, title, author, genre, totalCopies });
+  const input = createBookSchema.parse(req.body);
+  const book = await bookService.createBook(input);
   res.status(201).location(`${req.baseUrl}/${book.id}`).json(book);
 };
 
 export const updateBook: RequestHandler<IdParams> = async (req, res) => {
-  const { isbn, title, author, genre, totalCopies } = req.body ?? {};
-  const book = await bookService.updateBook(req.params.id, {
-    isbn,
-    title,
-    author,
-    genre,
-    totalCopies,
-  });
-  res.json(book);
+  const input = updateBookSchema.parse(req.body);
+  res.json(await bookService.updateBook(req.params.id, input));
 };
 
 export const borrowCopy: RequestHandler<IdParams> = async (req, res) => {
