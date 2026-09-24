@@ -41,19 +41,43 @@ After the module, I **rebuilt it from scratch** as a portfolio project with thre
 
 ```mermaid
 flowchart LR
-    client([Client]) -->|"REST + Bearer token :8080"| book[Book Service]
-    client -->|"login, REST + Bearer token :8081"| user[User Service]
-    user -->|"borrow / return a copy (service token)"| book
-    book -.->|"fetch public keys (JWKS)"| user
-    book --> booksdb[(MongoDB<br/>books)]
-    user --> usersdb[(MongoDB<br/>users)]
+    client([Client]) -->|":8000"| gateway[API Gateway<br/>nginx]
+    subgraph internal["Internal network"]
+        gateway -->|/api/books| book[Book Service]
+        gateway -->|"/api/auth, /api/users, /api/loans"| user[User Service]
+        user -->|"borrow / return a copy (service token)"| book
+        book -.->|"fetch public keys (JWKS)"| user
+        book --> booksdb[(MongoDB<br/>books)]
+        user --> usersdb[(MongoDB<br/>users)]
+    end
 ```
 
-| Service          | Responsibility                                                                            | Port  |
-| ---------------- | ----------------------------------------------------------------------------------------- | ----- |
-| **Book Service** | Book catalogue and copy availability                                                      | 8080  |
-| **User Service** | Accounts, login and loans. Issues tokens and coordinates borrowing with the Book Service. | 8081  |
-| **MongoDB**      | Separate `books` and `users` databases, one per service                                   | 27017 |
+| Component        | Responsibility                                                                            | Port                              |
+| ---------------- | ----------------------------------------------------------------------------------------- | --------------------------------- |
+| **API Gateway**  | The single entry point: routing, rate limiting, request IDs, hiding internal endpoints    | **8000** (the only one published) |
+| **Book Service** | Book catalogue and copy availability                                                      | 8080 (internal)                   |
+| **User Service** | Accounts, login and loans. Issues tokens and coordinates borrowing with the Book Service. | 8081 (internal)                   |
+| **MongoDB**      | Separate `books` and `users` databases, one per service                                   | 27017 (localhost only)            |
+
+### The API gateway
+
+Clients only ever talk to the gateway, an nginx container. The services have no published
+ports, so they can't be reached from outside the Docker network. The gateway:
+
+- **Routes** each path to the right service, and serves both services' docs side by side.
+- **Hides internal endpoints.** `/api/books/:id/borrow` and `/return` are only for the User
+  Service, which calls the Book Service directly on the internal network. The gateway
+  returns 404 for them, on top of the Book Service's own access check.
+- **Rate-limits** each client to 20 requests per second (bursts of 40), with a stricter
+  login limit inside the User Service. The services are told to trust exactly one proxy
+  (`TRUST_PROXY=1`), so they see each client's real IP. Otherwise every request would seem
+  to come from the gateway, and one person could use up everyone's login attempts.
+- **Gives every request an ID**, returned in the `X-Request-ID` header and passed to the
+  services. The same ID appears in the gateway's and the services' JSON logs, so one
+  request can be followed end to end.
+- **Returns clear errors**: JSON 404s for unknown paths, 429 when rate-limited, and 503
+  when a service is down.
+- Runs as a **non-root** user, and finds services again by name after they restart.
 
 ### How authentication works
 
@@ -129,11 +153,14 @@ Paste the `JWT_PRIVATE_KEY=...` line that the second command prints into `.env`,
 npm run docker:up
 ```
 
-This builds both services and starts them with MongoDB. Check that they're up:
+This builds the services and the gateway and starts them with MongoDB. Everything is
+reached through the gateway at **http://localhost:8000**. Check that it's up, then run
+the end-to-end tests, which log in, borrow and return a book, and clean up after
+themselves:
 
 ```bash
-curl http://localhost:8080/health/ready
-curl http://localhost:8081/health/ready
+curl http://localhost:8000/health
+npm run test:e2e
 ```
 
 Follow the logs with `npm run docker:logs`. Stop everything with `npm run docker:down`;
@@ -161,26 +188,28 @@ If you want to change a setting, copy a service's `.env.example` to `.env` and e
 Each service serves interactive docs, generated from the same Zod schemas that validate
 requests, so they can't drift from the real API:
 
-- Book Service: http://localhost:8080/docs
-- User Service: http://localhost:8081/docs
+- Book Service: http://localhost:8000/docs/books/
+- User Service: http://localhost:8000/docs/users/
 
 Log in with `POST /api/auth/login`, then click **Authorize** and paste the `accessToken`
-to try the protected endpoints. The raw specs are at `/openapi.json`.
+to try the protected endpoints. When running a service on its own with `npm run dev`,
+its docs are at `/docs` and the raw spec at `/openapi.json`.
 
 ### Useful scripts
 
-| Command                    | What it does                                              |
-| -------------------------- | --------------------------------------------------------- |
-| `npm test`                 | Run all tests (needs Docker for the integration tests)    |
-| `npm run test:unit`        | Unit tests only, no Docker needed (under a second)        |
-| `npm run test:integration` | API tests against a real MongoDB in a throwaway container |
-| `npm run test:watch`       | Re-run unit tests as you save                             |
-| `npm run test:coverage`    | Show which lines the tests cover                          |
-| `npm run keys:generate`    | Print a new token-signing key for `.env`                  |
-| `npm run typecheck`        | Type-check every service                                  |
-| `npm run lint`             | Run ESLint                                                |
-| `npm run format`           | Format all files with Prettier                            |
-| `npm run build`            | Compile every service to `dist/`                          |
+| Command                    | What it does                                                     |
+| -------------------------- | ---------------------------------------------------------------- |
+| `npm test`                 | Run all tests (needs Docker for the integration tests)           |
+| `npm run test:unit`        | Unit tests only, no Docker needed (under a second)               |
+| `npm run test:integration` | API tests against a real MongoDB in a throwaway container        |
+| `npm run test:e2e`         | End-to-end checks against the running stack, through the gateway |
+| `npm run test:watch`       | Re-run unit tests as you save                                    |
+| `npm run test:coverage`    | Show which lines the tests cover                                 |
+| `npm run keys:generate`    | Print a new token-signing key for `.env`                         |
+| `npm run typecheck`        | Type-check every service                                         |
+| `npm run lint`             | Run ESLint                                                       |
+| `npm run format`           | Format all files with Prettier                                   |
+| `npm run build`            | Compile every service to `dist/`                                 |
 
 ## Testing
 
@@ -199,6 +228,8 @@ About 200 tests cover both services, at around 95% line coverage:
   expired and unsigned (`alg: none`) tokens.
 - **A docs test** fails if an endpoint is added without being documented, or documented
   without existing.
+- **End-to-end checks** (`npm run test:e2e`) run the whole flow against the real stack
+  through the gateway, including checks on the gateway itself.
 
 ## Configuration
 
@@ -211,6 +242,7 @@ settings and stops immediately with a clear message if any are invalid.
 | `MONGODB_URI`                             | both    | `mongodb://localhost:27017/books` or `/users`             |
 | `LOG_LEVEL`                               | both    | `info`                                                    |
 | `CORS_ORIGIN`                             | both    | `*`                                                       |
+| `TRUST_PROXY`                             | both    | `0` (Docker Compose sets `1`: the gateway)                |
 | `JWT_ISSUER`                              | both    | `library-platform/user-service`                           |
 | `JWT_AUDIENCE`                            | both    | `library-platform`                                        |
 | `JWKS_URL`                                | book    | `http://localhost:8081/.well-known/jwks.json`             |
@@ -224,19 +256,19 @@ settings and stops immediately with a clear message if any are invalid.
 
 ## API reference
 
-### Book Service (`:8080`)
+### Book Service (`/api/books`)
 
-| Method   | Path                    | Access    | Description                                                          |
-| -------- | ----------------------- | --------- | -------------------------------------------------------------------- |
-| `GET`    | `/api/books`            | public    | List books. Filters: `?search=` (title or author), `?available=true` |
-| `GET`    | `/api/books/:id`        | public    | Get one book                                                         |
-| `POST`   | `/api/books`            | librarian | Add a book                                                           |
-| `PATCH`  | `/api/books/:id`        | librarian | Update some fields of a book                                         |
-| `DELETE` | `/api/books/:id`        | librarian | Delete a book (`409` if copies are on loan)                          |
-| `POST`   | `/api/books/:id/borrow` | service   | Take one copy off the shelf (`409` if none are left)                 |
-| `POST`   | `/api/books/:id/return` | service   | Put one copy back                                                    |
+| Method   | Path                    | Access    | Description                                                                                 |
+| -------- | ----------------------- | --------- | ------------------------------------------------------------------------------------------- |
+| `GET`    | `/api/books`            | public    | List books. Filters: `?search=` (title or author), `?available=true`                        |
+| `GET`    | `/api/books/:id`        | public    | Get one book                                                                                |
+| `POST`   | `/api/books`            | librarian | Add a book                                                                                  |
+| `PATCH`  | `/api/books/:id`        | librarian | Update some fields of a book                                                                |
+| `DELETE` | `/api/books/:id`        | librarian | Delete a book (`409` if copies are on loan)                                                 |
+| `POST`   | `/api/books/:id/borrow` | service   | Take one copy off the shelf (`409` if none are left). Internal: not exposed by the gateway. |
+| `POST`   | `/api/books/:id/return` | service   | Put one copy back. Internal: not exposed by the gateway.                                    |
 
-### User Service (`:8081`)
+### User Service (`/api/auth`, `/api/users`, `/api/loans`)
 
 | Method   | Path                                  | Access            | Description                                                     |
 | -------- | ------------------------------------- | ----------------- | --------------------------------------------------------------- |
@@ -262,15 +294,15 @@ check). Both are public, as are `/docs` and `/openapi.json`.
 
 ```bash
 # Sign up as a member (the response includes an accessToken and your user id)
-curl -X POST http://localhost:8081/api/auth/register \
+curl -X POST http://localhost:8000/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{"name": "Ada Lovelace", "email": "ada@example.com", "password": "correct horse battery staple"}'
 
 # Browse the catalogue (no token needed)
-curl http://localhost:8080/api/books
+curl http://localhost:8000/api/books
 
 # Borrow a book (use your token, your user id and a book id from above)
-curl -X POST http://localhost:8081/api/users/<userId>/loans \
+curl -X POST http://localhost:8000/api/users/<userId>/loans \
   -H "Authorization: Bearer <accessToken>" \
   -H "Content-Type: application/json" \
   -d '{"bookId": "<bookId>"}'
@@ -324,6 +356,7 @@ library-platform/
 │   └── user-service/        # Accounts, login and loans (same layout, plus clients/ for the Book Service)
 ├── scripts/                 # helper scripts, e.g. generating a signing key
 ├── Dockerfile               # one multi-stage build shared by all services
+├── gateway/                 # nginx API gateway (config and Dockerfile)
 ├── docker-compose.yml       # the full stack for local development
 ├── .env.example             # settings for docker compose (copy to .env)
 ├── infra/                   # Kubernetes and Terraform (coming in Phase 2)
@@ -338,7 +371,7 @@ library-platform/
   - [x] Unit and integration tests (Vitest, Testcontainers)
   - [x] OpenAPI docs and Swagger UI
   - [x] Authentication and access rules (JWT, Argon2id, JWKS)
-  - [ ] An API gateway
+  - [x] An API gateway (nginx)
   - [ ] A web frontend
 - [ ] **Phase 2: DevOps.** CI/CD with GitHub Actions, Kubernetes (Helm and Argo CD),
       Terraform and Azure, and observability (Prometheus, Grafana, OpenTelemetry).
