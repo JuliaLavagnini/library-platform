@@ -1,9 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
 import { useDeferredValue, useState } from 'react';
+import { Link } from 'react-router';
 import { booksApi, unwrap } from '../api/client.ts';
+import { useBorrowBook, useMemberLoans } from '../api/loans.ts';
+import type { Book } from '../api/types.ts';
+import { useAuth } from '../auth/AuthContext.tsx';
 import { Availability } from '../components/Availability.tsx';
+import { formatDate } from '../format.ts';
 
 export function BooksPage() {
+  const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [availableOnly, setAvailableOnly] = useState(false);
   // Waits for the user to pause typing before searching, without a manual debounce.
@@ -25,12 +31,45 @@ export function BooksPage() {
     placeholderData: (previous) => previous,
   });
 
+  // The logged-in member's active loans, to show "You have this" instead of "Borrow".
+  const loans = useMemberLoans(user?.id);
+  const onLoanToMe = new Set(
+    loans.data?.filter((loan) => loan.status === 'active').map((loan) => loan.bookId),
+  );
+
+  const borrow = useBorrowBook();
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  function handleBorrow(book: Book) {
+    if (!user) return;
+    setMessage(null);
+    borrow.mutate(
+      { userId: user.id, bookId: book.id },
+      {
+        onSuccess: (loan) =>
+          setMessage({
+            type: 'success',
+            text: `You borrowed “${book.title}”. Please return it by ${formatDate(loan.dueAt)}.`,
+          }),
+        onError: (error) => setMessage({ type: 'error', text: error.message }),
+      },
+    );
+  }
+
   return (
     <>
       <div className="page-header">
         <div>
           <h1>Books</h1>
-          <p className="muted">Browse the catalogue. Log in to borrow.</p>
+          <p className="muted">
+            {user ? (
+              'Browse the catalogue and borrow up to one copy of each book.'
+            ) : (
+              <>
+                Browse the catalogue. <Link to="/login">Log in</Link> to borrow.
+              </>
+            )}
+          </p>
         </div>
       </div>
 
@@ -54,6 +93,22 @@ export function BooksPage() {
           Available now
         </label>
       </div>
+
+      {message && (
+        <div
+          className={`alert ${message.type}`}
+          role={message.type === 'error' ? 'alert' : 'status'}
+          style={{ marginBottom: '1rem' }}
+        >
+          {message.text}
+          {message.type === 'success' && (
+            <>
+              {' '}
+              <Link to="/loans">See my loans</Link>
+            </>
+          )}
+        </div>
+      )}
 
       {books.isPending && <p className="muted">Loading books…</p>}
 
@@ -82,6 +137,20 @@ export function BooksPage() {
               </span>
               <div className="actions">
                 <Availability book={book} />
+                {user &&
+                  (onLoanToMe.has(book.id) ? (
+                    <span className="badge neutral">You have this</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="button small"
+                      disabled={book.availableCopies === 0 || borrow.isPending}
+                      onClick={() => handleBorrow(book)}
+                      aria-label={`Borrow ${book.title}`}
+                    >
+                      Borrow
+                    </button>
+                  ))}
               </div>
             </li>
           ))}
