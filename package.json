@@ -41,6 +41,7 @@
   },
   "allowScripts": {
     "protobufjs": false,
-    "ssh2": false
+    "ssh2": false,
+    "@scarf/scarf": false
   }
 }
