@@ -33,6 +33,8 @@ services:
       PORT: 8080
       LOG_LEVEL: info
       MONGODB_URI: mongodb://mongodb:27017/books
+      # Public keys for verifying login tokens, fetched from user-service when first needed.
+      JWKS_URL: http://user-service:8081/.well-known/jwks.json
     ports:
       - '8080:8080'
     depends_on:
@@ -53,6 +55,10 @@ services:
       MONGODB_URI: mongodb://mongodb:27017/users
       # Containers reach each other by service name on the Compose network.
       BOOK_SERVICE_URL: http://book-service:8080
+      # Secrets come from the .env file next to this one (see .env.example).
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      BOOTSTRAP_LIBRARIAN_EMAIL: ${BOOTSTRAP_LIBRARIAN_EMAIL:-}
+      BOOTSTRAP_LIBRARIAN_PASSWORD: ${BOOTSTRAP_LIBRARIAN_PASSWORD:-}
     ports:
       - '8081:8081'
     depends_on:

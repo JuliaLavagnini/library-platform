@@ -6,6 +6,7 @@ import {
   NotFoundError,
   ServiceUnavailableError,
 } from '../../src/errors/http-errors.ts';
+import { verifyAccessToken } from '../../src/services/token.service.ts';
 
 const bookId = '6ab476e7fd279464c59b87b6';
 
@@ -43,6 +44,26 @@ describe('book client', () => {
       `http://localhost:8080/api/books/${bookId}/return`,
     ]);
     expect(fetchMock.mock.calls.every(([, init]) => init?.method === 'POST')).toBe(true);
+  });
+
+  it('identifies itself to book-service with a service token', async () => {
+    const fetchMock = fakeFetch(() => jsonResponse(200, { id: bookId, title: 'Clean Code' }));
+
+    await borrowBookCopy(bookId);
+
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    const [scheme, token] = headers.get('Authorization')?.split(' ') ?? [];
+    expect(scheme).toBe('Bearer');
+    await expect(verifyAccessToken(token!)).resolves.toEqual({
+      id: 'user-service',
+      role: 'service',
+    });
+  });
+
+  it('treats book-service refusing its token as a server problem (502)', async () => {
+    fakeFetch(() => jsonResponse(403, { error: { message: 'Forbidden' } }));
+
+    await expect(borrowBookCopy(bookId)).rejects.toThrow(BadGatewayError);
   });
 
   it('returns only the fields this service needs', async () => {

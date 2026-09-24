@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { env } from '../config/env.ts';
 import { logger } from '../config/logger.ts';
+import { getServiceToken } from '../services/token.service.ts';
 import {
   BadGatewayError,
   ConflictError,
@@ -27,6 +28,8 @@ async function postBookAction(bookId: string, action: 'borrow' | 'return'): Prom
   try {
     response = await fetch(url, {
       method: 'POST',
+      // book-service only lets user-service move copies, so it proves who it is.
+      headers: { Authorization: `Bearer ${await getServiceToken()}` },
       signal: AbortSignal.timeout(env.BOOK_SERVICE_TIMEOUT_MS),
     });
   } catch (err) {
