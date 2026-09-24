@@ -15,7 +15,13 @@ export function createApp() {
   app.use(helmet());
   app.use(cors({ origin: env.CORS_ORIGIN }));
   app.use(express.json());
-  app.use(pinoHttp({ logger }));
+  app.use(
+    pinoHttp({
+      logger,
+      // Health checks run every few seconds; logging them would bury real traffic.
+      autoLogging: { ignore: (req) => req.url?.startsWith('/health') ?? false },
+    }),
+  );
 
   app.use('/health', healthRouter);
   app.use('/api/books', bookRouter);
