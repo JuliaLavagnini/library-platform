@@ -19,3 +19,17 @@ export class ConflictError extends HttpError {
     super(409, message);
   }
 }
+
+// A service this one depends on returned an unexpected response.
+export class BadGatewayError extends HttpError {
+  constructor(message: string) {
+    super(502, message);
+  }
+}
+
+// A service this one depends on could not be reached.
+export class ServiceUnavailableError extends HttpError {
+  constructor(message: string) {
+    super(503, message);
+  }
+}
