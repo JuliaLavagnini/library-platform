@@ -1,5 +1,7 @@
 # Online Library Platform
 
+[![CI](https://github.com/JuliaLavagnini/library-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/JuliaLavagnini/library-platform/actions/workflows/ci.yml)
+
 A microservices library system for managing books, members and loans, with a React web
 app. It is built with TypeScript, Express and MongoDB and runs in Docker. Over time it will grow into a complete
 platform covering DevOps, data engineering and MLOps.
@@ -265,6 +267,32 @@ About 240 tests cover both services and the web app, at over 90% line coverage:
   messages, automatic logout on an expired token, and the librarian pages.
 - **End-to-end checks** (`npm run test:e2e`) run the whole flow against the real stack
   through the gateway, including checks on the gateway itself.
+
+## Continuous integration
+
+Every push to `main` and every pull request runs the [CI pipeline](.github/workflows/ci.yml)
+on GitHub Actions:
+
+```mermaid
+flowchart LR
+    push([Push or pull request]) --> quality & test
+    quality["Format, lint, types<br/>+ API types up to date"] --> e2e
+    test["Unit, integration and web app tests<br/>+ coverage thresholds"] --> e2e
+    e2e["Build every image, start the stack,<br/>seed it, run end-to-end checks"]
+```
+
+- **Quality and tests run in parallel**; the end-to-end job only runs if both pass.
+- **Integration tests use a real MongoDB** (Testcontainers, on the runner's Docker).
+- **Coverage thresholds** fail the build if coverage drops (85% of lines, 75% of
+  branches). The report is kept as a downloadable artifact.
+- **The generated API types are checked**: if a service's API changed without
+  regenerating the web app's types, the build fails.
+- **End-to-end** builds all images, starts the stack with Docker Compose using
+  throwaway secrets generated for that run, and runs `npm run test:e2e` through the
+  gateway. Container logs are printed if anything fails.
+- **Supply-chain safety:** third-party actions are pinned to exact commits, the workflow
+  only has read access, and Dependabot opens weekly update PRs for npm packages, GitHub
+  Actions and Docker base images, which then go through the same pipeline.
 
 ## Configuration
 
