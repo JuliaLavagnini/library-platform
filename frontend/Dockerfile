@@ -20,7 +20,14 @@ COPY frontend frontend
 RUN npm run build --workspace=@library/web
 
 # ---- runtime: static files served by nginx, as a non-root user ----
-FROM nginxinc/nginx-unprivileged:1.29-alpine
+FROM nginxinc/nginx-unprivileged:1.30-alpine
+
+# Apply security fixes released since the base image was built, and remove curl: nginx
+# doesn't need it (the health check uses BusyBox wget), and every unneeded tool is one
+# more thing an attacker could use. Then switch back to the non-root nginx user.
+USER root
+RUN apk upgrade --no-cache && apk del --no-cache curl
+USER 101
 
 COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/frontend/dist /usr/share/nginx/html

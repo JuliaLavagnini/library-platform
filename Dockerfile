@@ -29,6 +29,15 @@ ARG SERVICE
 ENV NODE_ENV=production
 WORKDIR /app
 
+# The service only needs `node`. The package managers bundled in the base image (npm,
+# npx, corepack, yarn) are never used at runtime, but their own dependencies regularly
+# show up in vulnerability scans, so they're removed along with any OS security updates
+# applied.
+RUN apk upgrade --no-cache \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /opt/yarn-* \
+    /usr/local/bin/yarn /usr/local/bin/yarnpkg
+
 COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/services/${SERVICE}/package.json ./services/${SERVICE}/package.json
 COPY --from=build --chown=node:node /app/services/${SERVICE}/dist ./services/${SERVICE}/dist
