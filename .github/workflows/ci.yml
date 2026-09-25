@@ -1,0 +1,124 @@
+# Runs on every push to main and every pull request:
+#   quality  - formatting, lint, types, and generated API types being up to date
+#   test     - all unit, integration (real MongoDB via Testcontainers) and web app tests
+#   e2e      - builds every image, starts the full stack with Docker Compose, and runs the
+#              end-to-end checks through the gateway
+#
+# Third-party actions are pinned to a commit SHA (with the version in a comment), so a
+# moved or compromised tag can't change what runs here.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Read-only by default; no job needs to write to the repository.
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the older, now-irrelevant run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Format, lint and types
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run typecheck
+
+      # The web app's API types are generated from the services' OpenAPI documents. If a
+      # service changed without regenerating them, the frontend could be out of step.
+      - name: Check generated API types are up to date
+        run: |
+          npm run api:generate -w @library/web
+          if ! git diff --exit-code -- frontend/src/api/generated; then
+            echo "::error::Generated API types are out of date. Run 'npm run api:generate -w @library/web' and commit the result."
+            exit 1
+          fi
+
+  test:
+    name: Unit and integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Integration tests start MongoDB with Testcontainers, using the runner's Docker.
+      # Fails if coverage drops below the thresholds in vitest.config.ts.
+      - name: Run tests with coverage
+        run: npm run test:coverage
+
+      - name: Upload coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 14
+
+  e2e:
+    name: End-to-end (Docker Compose)
+    runs-on: ubuntu-latest
+    needs: [quality, test]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      # Fresh, throwaway secrets for this run only: nothing needs to be stored in GitHub.
+      - name: Create .env for the stack
+        run: |
+          node scripts/generate-jwt-key.ts > .env
+          echo "BOOTSTRAP_LIBRARIAN_EMAIL=ci-librarian@library.test" >> .env
+          echo "BOOTSTRAP_LIBRARIAN_PASSWORD=$(openssl rand -hex 16)" >> .env
+
+      - name: Build and start the stack
+        run: docker compose up --detach --build --wait --wait-timeout 180
+
+      - name: Seed sample books
+        run: npm run seed
+
+      - name: Run end-to-end checks
+        run: npm run test:e2e
+
+      - name: Show container logs
+        if: failure()
+        run: docker compose logs --no-color --timestamps
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down --volumes
