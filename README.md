@@ -278,7 +278,8 @@ flowchart LR
     push([Push or pull request]) --> quality & test
     quality["Format, lint, types<br/>+ API types up to date"] --> e2e
     test["Unit, integration and web app tests<br/>+ coverage thresholds"] --> e2e
-    e2e["Build every image, start the stack,<br/>seed it, run end-to-end checks"]
+    e2e["Build every image, start the stack,<br/>seed it, run end-to-end checks"] --> images
+    images["For each image: build, scan (Trivy),<br/>publish on main with SBOM + provenance"]
 ```
 
 - **Quality and tests run in parallel**; the end-to-end job only runs if both pass.
@@ -293,6 +294,39 @@ flowchart LR
 - **Supply-chain safety:** third-party actions are pinned to exact commits, the workflow
   only has read access, and Dependabot opens weekly update PRs for npm packages, GitHub
   Actions and Docker base images, which then go through the same pipeline.
+
+### Container images
+
+After the end-to-end checks pass, each of the four images is built and **scanned with
+[Trivy](https://trivy.dev)**. The build fails on any HIGH or CRITICAL vulnerability that
+has a fix available, and the results appear in the repository's **Security** tab. On
+`main`, images that pass are published to GitHub Container Registry:
+
+| Image        | Registry path                                          |
+| ------------ | ------------------------------------------------------ |
+| Book Service | `ghcr.io/julialavagnini/library-platform/book-service` |
+| User Service | `ghcr.io/julialavagnini/library-platform/user-service` |
+| Web app      | `ghcr.io/julialavagnini/library-platform/web`          |
+| API gateway  | `ghcr.io/julialavagnini/library-platform/gateway`      |
+
+Each is tagged `sha-<commit>` (exact and never reused, for deployments) and `latest`.
+Every published image has an **SBOM** (a list of every package inside it) and **build
+provenance** (a record of how and where it was built) attached.
+
+The images are kept small and hard to misuse:
+
+- **Multi-stage builds**: build tools stay in the build stage.
+- **Non-root users** in every container.
+- **Service images contain only `node`**: npm, npx, corepack and yarn are removed, since
+  nothing uses them at runtime and their own dependencies often have vulnerabilities.
+- **nginx images drop `curl`**, which nginx never needs.
+- **OS security updates are applied at build time**, so fixes published after the base
+  image was built are included.
+
+Scanning the images for the first time found 38 fixable HIGH and CRITICAL
+vulnerabilities in each nginx image (an end-of-life nginx 1.29 base, plus `curl`) and
+4 in each service image (npm's bundled packages). After these changes, all four images
+have none.
 
 ## Configuration
 
@@ -437,8 +471,13 @@ library-platform/
   - [x] Authentication and access rules (JWT, Argon2id, JWKS)
   - [x] An API gateway (nginx)
   - [x] A web frontend (React, TypeScript, Vite)
-- [ ] **Phase 2: DevOps.** CI/CD with GitHub Actions, Kubernetes (Helm and Argo CD),
-      Terraform and Azure, and observability (Prometheus, Grafana, OpenTelemetry).
+- [ ] **Phase 2: DevOps.**
+  - [x] CI with GitHub Actions: quality, tests, end-to-end, coverage thresholds
+  - [x] Container images: vulnerability scanning, SBOM and provenance, published to GHCR
+  - [ ] Kubernetes with Helm (local cluster)
+  - [ ] GitOps with Argo CD
+  - [ ] Observability: Prometheus, Grafana, Loki, OpenTelemetry
+  - [ ] Terraform and Azure (AKS)
 - [ ] **Phase 3: Data engineering.** Kafka events with the transactional outbox pattern, a
       dbt warehouse, orchestration, and analytics dashboards.
 - [ ] **Phase 4: MLOps.** A book recommendation model with MLflow, served on Kubernetes
