@@ -1,0 +1,26 @@
+# Opens pull requests to keep dependencies up to date. Each PR runs through CI, so an
+# update that breaks something is caught before it's merged.
+
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # One PR per week for minor and patch updates instead of one per package.
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Base images: node (services, web build) and nginx (gateway, web).
+  - package-ecosystem: docker
+    directories: [/, /gateway, /frontend]
+    schedule:
+      interval: weekly
