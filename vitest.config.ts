@@ -13,6 +13,13 @@ export default defineConfig({
         'frontend/src/api/generated/**',
       ],
       reporter: ['text', 'html', 'lcov'],
+      // CI fails if coverage drops below these (currently ~93% lines, ~81% branches).
+      thresholds: {
+        lines: 85,
+        statements: 85,
+        functions: 85,
+        branches: 75,
+      },
     },
   },
 });
