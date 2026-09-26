@@ -130,6 +130,10 @@ must('helm', [
   '--namespace',
   NAMESPACE,
   ...(local ? ['--values', `${CHART}/values-local.yaml`] : []),
+  // Start from the chart's defaults every time. Without this, an upgrade that passes no
+  // values silently keeps the previous run's (e.g. switching back from --local would keep
+  // using the local images).
+  '--reset-values',
   '--wait',
   '--timeout',
   '5m',
