@@ -1,0 +1,84 @@
+# Default settings for the library platform chart. Override per environment with
+# --set or an extra values file (see values-local.yaml).
+
+# Images published by CI to GitHub Container Registry. For reproducible deployments,
+# set `tag` to an exact build, e.g. sha-e53802f, instead of `latest`.
+image:
+  registry: ghcr.io/julialavagnini/library-platform
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Secrets are never stored in this chart. Create a Secret with these keys before
+# installing (scripts/k8s-up.ts does this from your .env):
+#   jwt-private-key                Ed25519 key user-service signs tokens with
+#   bootstrap-librarian-email      first librarian account (optional)
+#   bootstrap-librarian-password
+secrets:
+  existingSecret: library-platform-secrets
+
+logLevel: info
+
+bookService:
+  replicas: 2
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+
+userService:
+  replicas: 2
+  loanPeriodDays: 14
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+
+web:
+  replicas: 1
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { memory: 64Mi }
+
+gateway:
+  replicas: 2
+  # Address range of the Ingress controller in front of the gateway: only requests from
+  # there may report the client's IP (X-Forwarded-For). 10.42.0.0/16 is k3s' pod network.
+  trustedProxies: 10.42.0.0/16
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { memory: 128Mi }
+
+# A single-replica MongoDB inside the cluster, fine for local and demo use. In
+# production, set enabled: false and point `externalUri` at a managed database.
+mongodb:
+  enabled: true
+  image: mongo:8
+  storage: 1Gi
+  # Only used when enabled is false. Must not include a database name: each service
+  # adds its own (books, users).
+  externalUri: ''
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+
+ingress:
+  enabled: true
+  className: traefik
+  host: library.localhost
+
+# Only allow the traffic each component needs (see templates/networkpolicies.yaml).
+networkPolicies:
+  enabled: true
+  # Where the Ingress controller runs, so it may reach the gateway.
+  ingressController:
+    namespace: kube-system
+    podLabels:
+      app.kubernetes.io/name: traefik

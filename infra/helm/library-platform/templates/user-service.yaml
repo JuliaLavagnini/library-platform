@@ -1,0 +1,95 @@
+{{- $ctx := dict "root" . "component" "user-service" -}}
+{{- $values := .Values.userService -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lp.name" $ctx }}
+  labels:
+    {{- include "lp.labels" $ctx | nindent 4 }}
+spec:
+  {{- if not $values.autoscaling.enabled }}
+  replicas: {{ $values.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "lp.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lp.labels" $ctx | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "lp.podSecurityContext" (dict "uid" 1000) | nindent 8 }}
+      containers:
+        - name: user-service
+          image: {{ include "lp.image" $ctx }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8081
+          env:
+            - name: PORT
+              value: '8081'
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+            - name: MONGODB_URI
+              value: {{ include "lp.mongodbUri" (dict "root" . "database" "users") | quote }}
+            - name: BOOK_SERVICE_URL
+              value: {{ include "lp.url" (dict "root" . "component" "book-service" "port" 8080) | quote }}
+            - name: LOAN_PERIOD_DAYS
+              value: {{ $values.loanPeriodDays | quote }}
+            - name: TRUST_PROXY
+              value: '1'
+            # Every replica must sign with the same key, so it comes from a Secret.
+            - name: JWT_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: jwt-private-key
+            - name: BOOTSTRAP_LIBRARIAN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: bootstrap-librarian-email
+                  optional: true
+            - name: BOOTSTRAP_LIBRARIAN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: bootstrap-librarian-password
+                  optional: true
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /health/ready, port: http }
+            periodSeconds: 5
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          securityContext:
+            {{- include "lp.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lp.name" $ctx }}
+  labels:
+    {{- include "lp.labels" $ctx | nindent 4 }}
+spec:
+  selector:
+    {{- include "lp.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http

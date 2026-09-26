@@ -1,0 +1,11 @@
+apiVersion: v2
+name: library-platform
+description: >-
+  Library platform on Kubernetes: book and user services, the web app, the API gateway,
+  and (optionally) MongoDB.
+type: application
+version: 0.1.0
+appVersion: '0.1.0'
+home: https://github.com/JuliaLavagnini/library-platform
+sources:
+  - https://github.com/JuliaLavagnini/library-platform

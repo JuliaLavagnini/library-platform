@@ -1,0 +1,81 @@
+{{- if .Values.mongodb.enabled }}
+{{- $ctx := dict "root" . "component" "mongodb" -}}
+{{- $values := .Values.mongodb -}}
+# A StatefulSet keeps a stable identity and its own persistent volume, so the data
+# survives the pod being restarted or rescheduled.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "lp.name" $ctx }}
+  labels:
+    {{- include "lp.labels" $ctx | nindent 4 }}
+spec:
+  serviceName: {{ include "lp.name" $ctx }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "lp.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lp.labels" $ctx | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        # 999 is the "mongodb" user in the official image.
+        {{- include "lp.podSecurityContext" (dict "uid" 999) | nindent 8 }}
+      containers:
+        - name: mongodb
+          image: {{ $values.image }}
+          ports:
+            - name: mongodb
+              containerPort: 27017
+          readinessProbe:
+            exec:
+              command: [mongosh, --quiet, --eval, "db.adminCommand('ping')"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: mongodb }
+            periodSeconds: 20
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          securityContext:
+            {{- include "lp.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+            - name: configdb
+              mountPath: /data/configdb
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: configdb
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: {{ $values.storage }}
+---
+# A "headless" Service: gives the database pod a stable DNS name.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lp.name" $ctx }}
+  labels:
+    {{- include "lp.labels" $ctx | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "lp.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: mongodb
+      port: 27017
+      targetPort: mongodb
+{{- end }}

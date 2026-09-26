@@ -1,0 +1,79 @@
+{{- $ctx := dict "root" . "component" "book-service" -}}
+{{- $values := .Values.bookService -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lp.name" $ctx }}
+  labels:
+    {{- include "lp.labels" $ctx | nindent 4 }}
+spec:
+  {{- if not $values.autoscaling.enabled }}
+  replicas: {{ $values.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "lp.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lp.labels" $ctx | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "lp.podSecurityContext" (dict "uid" 1000) | nindent 8 }}
+      containers:
+        - name: book-service
+          image: {{ include "lp.image" $ctx }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: PORT
+              value: '8080'
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+            - name: MONGODB_URI
+              value: {{ include "lp.mongodbUri" (dict "root" . "database" "books") | quote }}
+            - name: JWKS_URL
+              value: {{ printf "%s/.well-known/jwks.json" (include "lp.url" (dict "root" . "component" "user-service" "port" 8081)) | quote }}
+            # One proxy in front: the gateway, which already resolved the client's IP.
+            - name: TRUST_PROXY
+              value: '1'
+          # Started: the process answers at all (a slow start isn't mistaken for a hang).
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          # Alive: restart the container if it stops answering.
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+          # Ready: only send traffic while the database is reachable.
+          readinessProbe:
+            httpGet: { path: /health/ready, port: http }
+            periodSeconds: 5
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          securityContext:
+            {{- include "lp.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lp.name" $ctx }}
+  labels:
+    {{- include "lp.labels" $ctx | nindent 4 }}
+spec:
+  selector:
+    {{- include "lp.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

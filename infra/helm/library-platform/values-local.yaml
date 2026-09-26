@@ -1,0 +1,7 @@
+# Use images built on this machine (docker compose build) instead of the published
+# ones: `npm run k8s:up -- --local` imports them into the cluster and uses this file.
+image:
+  registry: library-platform
+  tag: dev
+  # The images are copied straight into the cluster, so never try to download them.
+  pullPolicy: Never

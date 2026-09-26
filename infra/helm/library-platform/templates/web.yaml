@@ -1,0 +1,59 @@
+{{- $ctx := dict "root" . "component" "web" -}}
+{{- $values := .Values.web -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lp.name" $ctx }}
+  labels:
+    {{- include "lp.labels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ $values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "lp.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lp.labels" $ctx | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "lp.podSecurityContext" (dict "uid" 101) | nindent 8 }}
+      containers:
+        - name: web
+          image: {{ include "lp.image" $ctx }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          livenessProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 5
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          securityContext:
+            {{- include "lp.containerSecurityContext" . | nindent 12 }}
+          # nginx writes its pid file and temporary files to /tmp.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lp.name" $ctx }}
+  labels:
+    {{- include "lp.labels" $ctx | nindent 4 }}
+spec:
+  selector:
+    {{- include "lp.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

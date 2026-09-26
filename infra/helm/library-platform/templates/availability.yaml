@@ -1,0 +1,45 @@
+{{- /*
+Autoscaling and disruption budgets for the two services.
+  HorizontalPodAutoscaler: adds pods when average CPU use passes the target, removes them
+    when load drops (k3s ships the metrics-server this needs).
+  PodDisruptionBudget: during voluntary disruptions such as node maintenance, Kubernetes
+    keeps at least one pod of each service running.
+*/ -}}
+{{- range $component, $values := dict "book-service" .Values.bookService "user-service" .Values.userService }}
+{{- $ctx := dict "root" $ "component" $component }}
+{{- if $values.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "lp.name" $ctx }}
+  labels:
+    {{- include "lp.labels" $ctx | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "lp.name" $ctx }}
+  minReplicas: {{ $values.autoscaling.minReplicas }}
+  maxReplicas: {{ $values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $values.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "lp.name" $ctx }}
+  labels:
+    {{- include "lp.labels" $ctx | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "lp.selectorLabels" $ctx | nindent 6 }}
+{{- end }}

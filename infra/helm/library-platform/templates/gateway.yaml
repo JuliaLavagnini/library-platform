@@ -1,0 +1,69 @@
+{{- $ctx := dict "root" . "component" "gateway" -}}
+{{- $values := .Values.gateway -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lp.name" $ctx }}
+  labels:
+    {{- include "lp.labels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ $values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "lp.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lp.labels" $ctx | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "lp.podSecurityContext" (dict "uid" 101) | nindent 8 }}
+      containers:
+        - name: gateway
+          image: {{ include "lp.image" $ctx }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          # The same image as in Docker Compose; only where things live changes.
+          env:
+            - name: GATEWAY_BOOK_SERVICE_URL
+              value: {{ include "lp.fqdnUrl" (dict "root" . "component" "book-service" "port" 8080) | quote }}
+            - name: GATEWAY_USER_SERVICE_URL
+              value: {{ include "lp.fqdnUrl" (dict "root" . "component" "user-service" "port" 8081) | quote }}
+            - name: GATEWAY_WEB_URL
+              value: {{ include "lp.fqdnUrl" (dict "root" . "component" "web" "port" 8080) | quote }}
+            - name: GATEWAY_TRUSTED_PROXIES
+              value: {{ $values.trustedProxies | quote }}
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 5
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          securityContext:
+            {{- include "lp.containerSecurityContext" . | nindent 12 }}
+          # The rendered config, pid file and temporary files all live in /tmp.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lp.name" $ctx }}
+  labels:
+    {{- include "lp.labels" $ctx | nindent 4 }}
+spec:
+  selector:
+    {{- include "lp.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

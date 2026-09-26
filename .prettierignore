@@ -2,3 +2,5 @@ dist
 coverage
 node_modules
 package-lock.json
+# Helm templates are Go templates, not YAML, until rendered.
+infra/helm/*/templates

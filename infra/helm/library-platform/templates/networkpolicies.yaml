@@ -1,0 +1,108 @@
+{{- if .Values.networkPolicies.enabled }}
+{{- /*
+Network policies: by default nothing in the release may receive traffic, then each
+component is opened only to the components that need it:
+
+  Ingress controller -> gateway -> web, book-service, user-service
+  user-service -> book-service (borrow/return a copy)
+  book-service -> user-service (fetch public keys)
+  book-service, user-service -> mongodb
+
+So even if one pod were compromised, it couldn't reach the database unless it's one of
+the two services that use it.
+*/ -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-default-deny
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lp.name" (dict "root" . "component" "gateway") }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "lp.selectorLabels" (dict "root" . "component" "gateway") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicies.ingressController.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicies.ingressController.podLabels | nindent 14 }}
+      ports:
+        - port: http
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lp.name" (dict "root" . "component" "web") }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "lp.selectorLabels" (dict "root" . "component" "web") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- include "lp.from" (dict "root" . "component" "gateway") | nindent 8 }}
+      ports:
+        - port: http
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lp.name" (dict "root" . "component" "book-service") }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "lp.selectorLabels" (dict "root" . "component" "book-service") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- include "lp.from" (dict "root" . "component" "gateway") | nindent 8 }}
+        {{- include "lp.from" (dict "root" . "component" "user-service") | nindent 8 }}
+      ports:
+        - port: http
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lp.name" (dict "root" . "component" "user-service") }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "lp.selectorLabels" (dict "root" . "component" "user-service") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- include "lp.from" (dict "root" . "component" "gateway") | nindent 8 }}
+        {{- include "lp.from" (dict "root" . "component" "book-service") | nindent 8 }}
+      ports:
+        - port: http
+{{- if .Values.mongodb.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lp.name" (dict "root" . "component" "mongodb") }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "lp.selectorLabels" (dict "root" . "component" "mongodb") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- include "lp.from" (dict "root" . "component" "book-service") | nindent 8 }}
+        {{- include "lp.from" (dict "root" . "component" "user-service") | nindent 8 }}
+      ports:
+        - port: mongodb
+{{- end }}
+{{- end }}
