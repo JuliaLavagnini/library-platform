@@ -9,9 +9,9 @@ kind: Application
 metadata:
   name: library-platform
   namespace: argocd
-  # Deleting this Application also deletes everything it deployed.
+  # Deleting this Application also deletes everything it deployed (in the background).
   finalizers:
-    - resources-finalizer.argocd.argoproj.io
+    - resources-finalizer.argocd.argoproj.io/background
 spec:
   project: default
   source:

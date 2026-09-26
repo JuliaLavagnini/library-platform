@@ -73,7 +73,13 @@ const toolChecks: [string, string[]][] = [
 ];
 for (const [tool, args] of toolChecks) {
   if (!succeeds(tool, args)) {
-    console.error(`${tool} is required but wasn't found. See the README's Kubernetes section.`);
+    // `docker version` also fails when Docker is installed but its engine isn't running.
+    const installedButStopped = tool === 'docker' && succeeds('docker', ['--version']);
+    console.error(
+      installedButStopped
+        ? 'Docker is installed but not running. Start Docker Desktop and try again.'
+        : `${tool} is required but wasn't found. See the README's Kubernetes section.`,
+    );
     process.exit(1);
   }
 }
@@ -93,7 +99,9 @@ const exists = (JSON.parse(clusters.stdout || '[]') as { name: string }[]).some(
   (cluster) => cluster.name === CLUSTER,
 );
 if (exists) {
-  console.log(`\nCluster "${CLUSTER}" already exists.`);
+  // Its containers stop when Docker restarts; this starts them again (no-op if running).
+  console.log(`\nCluster "${CLUSTER}" already exists; making sure it's running.`);
+  must('k3d', ['cluster', 'start', CLUSTER, '--wait']);
 } else {
   must('k3d', ['cluster', 'create', '--config', 'infra/k3d/cluster.yaml', '--wait']);
 }
