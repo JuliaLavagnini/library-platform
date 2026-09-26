@@ -11,7 +11,10 @@ metadata:
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   rules:
-    - host: {{ .Values.ingress.host }}
+    # Without a host, the rule matches requests for any hostname (e.g. localhost).
+    - {{- with .Values.ingress.host }}
+      host: {{ . }}
+      {{- end }}
       http:
         paths:
           - path: /

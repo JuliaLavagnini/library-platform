@@ -29,7 +29,9 @@
     "test:integration": "vitest run --project \"*:integration\"",
     "keys:generate": "node scripts/generate-jwt-key.ts",
     "test:e2e": "node --env-file-if-exists=.env scripts/e2e.ts",
-    "seed": "node --env-file-if-exists=.env scripts/seed.ts"
+    "seed": "node --env-file-if-exists=.env scripts/seed.ts",
+    "k8s:up": "node scripts/k8s-up.ts",
+    "k8s:down": "node scripts/k8s-down.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

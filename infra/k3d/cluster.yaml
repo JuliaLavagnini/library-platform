@@ -1,0 +1,19 @@
+# A local Kubernetes cluster (k3s, running in Docker via k3d) for trying the Helm chart.
+#
+#   npm run k8s:up      create this cluster (if needed) and install the platform
+#   npm run k8s:down    delete the cluster
+#
+# The app is then at http://localhost:8088. It runs alongside Docker Compose (port 8000).
+
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: library
+# Pinned, so everyone gets the same Kubernetes version.
+image: rancher/k3s:v1.35.5-k3s1
+servers: 1
+agents: 1
+ports:
+  # Host port 8088 -> the cluster's Ingress controller (Traefik, included with k3s).
+  - port: 8088:80
+    nodeFilters: [loadbalancer]

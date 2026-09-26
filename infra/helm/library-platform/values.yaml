@@ -72,7 +72,9 @@ mongodb:
 ingress:
   enabled: true
   className: traefik
-  host: library.localhost
+  # Leave empty to answer on any hostname (locally: http://localhost:8088). Set a real
+  # domain, e.g. library.example.com, when deploying somewhere public.
+  host: ''
 
 # Only allow the traffic each component needs (see templates/networkpolicies.yaml).
 networkPolicies:
