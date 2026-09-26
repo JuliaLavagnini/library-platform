@@ -39,6 +39,7 @@ After the module, I **rebuilt it from scratch** as a portfolio project with thre
 | Loans              | A list stored inside each user record                                              | Their own collection, with a database rule of one active loan per member per book     |
 | Databases          | One shared database                                                                | One database per service                                                              |
 | Docker images      | Copied a pre-built JAR and ran as root                                             | Multi-stage build, production dependencies only, non-root user, health check          |
+| Kubernetes         | Plain YAML with the database password inline, on a university cluster              | Helm chart on my own cluster: probes, autoscaling, locked-down pods, network policies |
 
 ## Architecture
 
@@ -138,6 +139,7 @@ with events (Kafka and the transactional outbox pattern) to close that gap.
 - **Testing:** Vitest, Supertest, Testcontainers (a real MongoDB per test run), and Testing
   Library with Mock Service Worker for the web app
 - **Containers:** Docker multi-stage builds, Docker Compose
+- **Kubernetes:** Helm chart, k3d (k3s) for the local cluster, Traefik Ingress
 - **Code quality:** ESLint, Prettier, npm workspaces
 
 ## Getting started
@@ -239,6 +241,8 @@ its docs are at `/docs` and the raw spec at `/openapi.json`.
 | `npm run test:coverage`    | Show which lines the tests cover                                 |
 | `npm run seed`             | Add sample books to the catalogue (skips ones that exist)        |
 | `npm run keys:generate`    | Print a new token-signing key for `.env`                         |
+| `npm run k8s:up`           | Create the local Kubernetes cluster and install the platform     |
+| `npm run k8s:down`         | Delete the local Kubernetes cluster                              |
 | `npm run typecheck`        | Type-check every service and the web app                         |
 | `npm run lint`             | Run ESLint                                                       |
 | `npm run format`           | Format all files with Prettier                                   |
@@ -327,6 +331,110 @@ Scanning the images for the first time found 38 fixable HIGH and CRITICAL
 vulnerabilities in each nginx image (an end-of-life nginx 1.29 base, plus `curl`) and
 4 in each service image (npm's bundled packages). After these changes, all four images
 have none.
+
+## Kubernetes
+
+The platform can also run on Kubernetes, using the [Helm chart](infra/helm/library-platform)
+and the same images CI publishes. Locally it runs on a [k3d](https://k3d.io) cluster (k3s
+inside Docker), side by side with Docker Compose.
+
+### Run it locally
+
+You need [Helm](https://helm.sh), [k3d](https://k3d.io) and `kubectl` (included with
+Docker Desktop). On Windows:
+
+```bash
+winget install Helm.Helm
+winget install k3d.k3d
+```
+
+With your `.env` in place (see [Getting started](#getting-started)):
+
+```bash
+npm run k8s:up
+```
+
+This creates the cluster from [infra/k3d/cluster.yaml](infra/k3d/cluster.yaml), creates
+a Kubernetes Secret from the signing key and librarian in `.env`, installs the chart and
+waits until everything is ready. The app is then at **http://localhost:8088**. Add sample
+books and run the end-to-end checks against the cluster:
+
+```bash
+GATEWAY_URL=http://localhost:8088 npm run seed
+GATEWAY_URL=http://localhost:8088 npm run test:e2e
+```
+
+By default the cluster pulls the images published by CI. To try local changes instead,
+use `npm run k8s:up -- --local`: it builds the images on your machine and copies them
+straight into the cluster. `npm run k8s:down` deletes the cluster and its data.
+
+### What the chart deploys
+
+| Component    | Kind                      | Replicas            |
+| ------------ | ------------------------- | ------------------- |
+| Book Service | Deployment + Service      | 2 to 5 (autoscaled) |
+| User Service | Deployment + Service      | 2 to 5 (autoscaled) |
+| Web app      | Deployment + Service      | 1                   |
+| Gateway      | Deployment + Service      | 2                   |
+| MongoDB      | StatefulSet + 1 GB volume | 1 (optional)        |
+| Ingress      | Traefik → gateway         |                     |
+
+- **Health probes.** A startup probe gives each service time to boot, a liveness probe
+  restarts it if it hangs, and a readiness probe only sends it traffic while its database
+  is reachable.
+- **Autoscaling and availability.** Both services scale from 2 to 5 pods at 70% CPU, and
+  a disruption budget keeps at least one pod of each running during maintenance.
+- **Locked-down containers.** Every container runs as a non-root user with a read-only
+  filesystem, no Linux capabilities, no privilege escalation and the default seccomp
+  profile. None of them gets a Kubernetes API token.
+- **Network policies.** Nothing can receive traffic unless allowed: only the Ingress
+  controller can reach the gateway, and only the two services can reach MongoDB. Even a
+  compromised pod couldn't reach the database unless it's one of those two.
+- **No secrets in the chart.** The User Service reads its signing key and first librarian
+  from a Secret created outside the chart, so every replica signs tokens with the same key.
+- **Same images as Docker Compose.** Only configuration changes. For example, the gateway
+  fills in its upstream addresses and DNS server from environment variables at startup.
+
+```mermaid
+flowchart LR
+    ingress([Traefik Ingress]) --> gateway
+    gateway --> web & book[book-service] & user[user-service]
+    user --> book
+    book -. public keys .-> user
+    book & user --> mongodb[(MongoDB)]
+```
+
+_Every other connection between pods is blocked by the network policies._
+
+### Starting without a start order
+
+Kubernetes starts everything at once, so the services often start before MongoDB is
+ready. Instead of crashing and being restarted, each service starts answering health
+checks straight away, reports "not ready" until it connects, and retries the database
+with increasing waits. A fresh install comes up with no restarts. When several User
+Service pods start together, exactly one creates the first librarian account.
+
+### Settings
+
+Everything configurable is in [values.yaml](infra/helm/library-platform/values.yaml),
+for example:
+
+| Setting                   | Default                                                                    |
+| ------------------------- | -------------------------------------------------------------------------- |
+| `image.tag`               | `latest`: set an exact build, e.g. `sha-e53802f`, for reproducible deploys |
+| `mongodb.enabled`         | `true`: set `false` and `mongodb.externalUri` to use a managed database    |
+| `ingress.host`            | empty (any hostname): set a real domain when deploying publicly            |
+| `bookService.autoscaling` | 2 to 5 replicas at 70% CPU                                                 |
+| `networkPolicies.enabled` | `true`                                                                     |
+
+### Known limitations
+
+- **Login rate limiting is per pod.** With 2 User Service pods, a client gets up to 10
+  attempts per minute on each. A shared store such as Redis would make it exact.
+- **MongoDB is a single instance.** Fine locally; in production, use a managed database
+  or a replica set.
+- **Locally, every request comes from your own machine**, so client IPs all look the same
+  in the cluster. In a cloud cluster the load balancer passes real client IPs through.
 
 ## Configuration
 
@@ -457,7 +565,10 @@ library-platform/
 ├── gateway/                 # nginx API gateway (config and Dockerfile)
 ├── docker-compose.yml       # the full stack for local development
 ├── .env.example             # settings for docker compose (copy to .env)
-├── infra/                   # Kubernetes and Terraform (coming in Phase 2)
+├── infra/
+│   ├── helm/                # Helm chart for Kubernetes
+│   ├── k3d/                 # local Kubernetes cluster definition
+│   └── terraform/           # cloud infrastructure (coming later in Phase 2)
 └── docs/adr/                # decision records
 ```
 
@@ -474,7 +585,7 @@ library-platform/
 - [ ] **Phase 2: DevOps.**
   - [x] CI with GitHub Actions: quality, tests, end-to-end, coverage thresholds
   - [x] Container images: vulnerability scanning, SBOM and provenance, published to GHCR
-  - [ ] Kubernetes with Helm (local cluster)
+  - [x] Kubernetes with Helm (local cluster)
   - [ ] GitOps with Argo CD
   - [ ] Observability: Prometheus, Grafana, Loki, OpenTelemetry
   - [ ] Terraform and Azure (AKS)
