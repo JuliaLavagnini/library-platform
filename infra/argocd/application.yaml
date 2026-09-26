@@ -1,0 +1,36 @@
+# Tells Argo CD what to deploy and keep deployed: the Helm chart from this repository's
+# main branch, with the local environment's settings, into the "library" namespace.
+#
+# Argo CD checks the repository every few minutes. Whenever the chart or the environment
+# settings change on main, it updates the cluster to match. If anything in the cluster is
+# changed by hand, it puts it back (self-healing).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: library-platform
+  namespace: argocd
+  # Deleting this Application also deletes everything it deployed.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/JuliaLavagnini/library-platform.git
+    targetRevision: main
+    path: infra/helm/library-platform
+    helm:
+      releaseName: library
+      valueFiles:
+        - values.yaml
+        - ../../environments/local/values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: library
+  syncPolicy:
+    automated:
+      # Delete resources that were removed from the chart.
+      prune: true
+      # Undo manual changes made directly in the cluster.
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

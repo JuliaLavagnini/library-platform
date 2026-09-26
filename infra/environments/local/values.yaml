@@ -1,0 +1,8 @@
+# What the local cluster runs. Argo CD deploys the Helm chart with these settings on top
+# of its defaults (infra/helm/library-platform/values.yaml).
+#
+# CI updates image.tag after every successful build on main, so each deployment is a
+# commit to this file: `git log infra/environments/local` is the deployment history, and
+# reverting a commit rolls the cluster back.
+image:
+  tag: sha-c8e77c8
