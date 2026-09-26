@@ -182,4 +182,15 @@ describe('bootstrap librarian', () => {
     await ensureBootstrapLibrarian(undefined, undefined);
     expect(await UserModel.countDocuments()).toBe(0);
   });
+
+  // Several replicas start together in Kubernetes and all run this at once.
+  it('creates exactly one librarian when several instances start at once', async () => {
+    await expect(
+      Promise.all(
+        Array.from({ length: 5 }, () => ensureBootstrapLibrarian('head@library.test', password)),
+      ),
+    ).resolves.toBeDefined();
+
+    expect(await UserModel.countDocuments({ role: 'librarian' })).toBe(1);
+  });
 });

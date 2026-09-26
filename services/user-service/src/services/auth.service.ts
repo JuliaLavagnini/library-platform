@@ -45,11 +45,22 @@ export async function ensureBootstrapLibrarian(email?: string, password?: string
     return;
   }
 
-  await UserModel.create({
-    name: 'Librarian',
-    email,
-    role: 'librarian',
-    passwordHash: await hashPassword(password),
-  });
-  logger.info({ email }, 'created bootstrap librarian account');
+  try {
+    await UserModel.create({
+      name: 'Librarian',
+      email,
+      role: 'librarian',
+      passwordHash: await hashPassword(password),
+    });
+    logger.info({ email }, 'created bootstrap librarian account');
+  } catch (err) {
+    // With several replicas starting at once, another one may have created the account
+    // between the checks above and now. The unique email index makes that a duplicate-key
+    // error, which is fine: the librarian exists.
+    if (typeof err === 'object' && err !== null && 'code' in err && err.code === 11000) {
+      logger.info({ email }, 'bootstrap librarian already created by another instance');
+      return;
+    }
+    throw err;
+  }
 }
