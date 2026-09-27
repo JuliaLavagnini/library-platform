@@ -5,4 +5,4 @@
 # commit to this file: `git log infra/environments/local` is the deployment history, and
 # reverting a commit rolls the cluster back.
 image:
-  tag: sha-c8e77c8
+  tag: sha-c8e5cae
