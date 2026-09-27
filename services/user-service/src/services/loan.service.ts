@@ -5,6 +5,7 @@ import { logger } from '../config/logger.ts';
 import { ConflictError, NotFoundError } from '../errors/http-errors.ts';
 import { LoanModel } from '../models/loan.model.ts';
 import type { LoanStatusFilter } from '../schemas/loan.schemas.ts';
+import { loanMetrics } from '../telemetry.ts';
 import { getUser } from './user.service.ts';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -47,14 +48,17 @@ export async function borrowBook(userId: string, bookId: string) {
 
   try {
     const borrowedAt = new Date();
-    return await LoanModel.create({
+    const loan = await LoanModel.create({
       userId,
       bookId,
       bookTitle: book.title,
       borrowedAt,
       dueAt: new Date(borrowedAt.getTime() + env.LOAN_PERIOD_DAYS * DAY_MS),
     });
+    loanMetrics.borrowed.add(1);
+    return loan;
   } catch (err) {
+    loanMetrics.compensations.add(1);
     await bookClient.returnBookCopy(bookId).catch((compensationErr: unknown) => {
       // Needs manual repair: book-service still counts this copy as on loan.
       logger.error({ err: compensationErr, bookId }, 'compensation failed: copy not returned');
@@ -89,5 +93,6 @@ export async function returnLoan(userId: string, loanId: string) {
     throw err;
   }
 
+  loanMetrics.returned.add(1);
   return loan;
 }

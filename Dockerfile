@@ -52,4 +52,6 @@ EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://localhost:' + (process.env.PORT || 8080) + '/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 
-CMD ["node", "--enable-source-maps", "dist/server.js"]
+# OpenTelemetry is loaded first so it can instrument the app; it does nothing unless
+# OTEL_EXPORTER_OTLP_ENDPOINT is set (see src/instrumentation.ts).
+CMD ["node", "--enable-source-maps", "--import", "./dist/instrumentation.js", "dist/server.js"]

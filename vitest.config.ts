@@ -9,6 +9,8 @@ export default defineConfig({
       include: ['services/*/src/**/*.ts', 'frontend/src/**/*.{ts,tsx}'],
       exclude: [
         'services/*/src/server.ts',
+        // Only active when an OpenTelemetry endpoint is configured.
+        'services/*/src/instrumentation.ts',
         'frontend/src/main.tsx',
         'frontend/src/api/generated/**',
       ],
