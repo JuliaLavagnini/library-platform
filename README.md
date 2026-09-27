@@ -231,22 +231,23 @@ its docs are at `/docs` and the raw spec at `/openapi.json`.
 
 ### Useful scripts
 
-| Command                    | What it does                                                     |
-| -------------------------- | ---------------------------------------------------------------- |
-| `npm test`                 | Run all tests (needs Docker for the integration tests)           |
-| `npm run test:unit`        | Unit and web app tests, no Docker needed (a few seconds)         |
-| `npm run test:integration` | API tests against a real MongoDB in a throwaway container        |
-| `npm run test:e2e`         | End-to-end checks against the running stack, through the gateway |
-| `npm run test:watch`       | Re-run unit tests as you save                                    |
-| `npm run test:coverage`    | Show which lines the tests cover                                 |
-| `npm run seed`             | Add sample books to the catalogue (skips ones that exist)        |
-| `npm run keys:generate`    | Print a new token-signing key for `.env`                         |
-| `npm run k8s:up`           | Create the local Kubernetes cluster and install the platform     |
-| `npm run k8s:down`         | Delete the local Kubernetes cluster                              |
-| `npm run typecheck`        | Type-check every service and the web app                         |
-| `npm run lint`             | Run ESLint                                                       |
-| `npm run format`           | Format all files with Prettier                                   |
-| `npm run build`            | Compile every service and the web app to `dist/`                 |
+| Command                      | What it does                                                     |
+| ---------------------------- | ---------------------------------------------------------------- |
+| `npm test`                   | Run all tests (needs Docker for the integration tests)           |
+| `npm run test:unit`          | Unit and web app tests, no Docker needed (a few seconds)         |
+| `npm run test:integration`   | API tests against a real MongoDB in a throwaway container        |
+| `npm run test:e2e`           | End-to-end checks against the running stack, through the gateway |
+| `npm run test:watch`         | Re-run unit tests as you save                                    |
+| `npm run test:coverage`      | Show which lines the tests cover                                 |
+| `npm run seed`               | Add sample books to the catalogue (skips ones that exist)        |
+| `npm run keys:generate`      | Print a new token-signing key for `.env`                         |
+| `npm run k8s:up`             | Create the local Kubernetes cluster and install the platform     |
+| `npm run k8s:up -- --gitops` | The same, but Argo CD deploys the platform from GitHub           |
+| `npm run k8s:down`           | Delete the local Kubernetes cluster                              |
+| `npm run typecheck`          | Type-check every service and the web app                         |
+| `npm run lint`               | Run ESLint                                                       |
+| `npm run format`             | Format all files with Prettier                                   |
+| `npm run build`              | Compile every service and the web app to `dist/`                 |
 
 ## Testing
 
@@ -283,7 +284,8 @@ flowchart LR
     quality["Format, lint, types<br/>+ API types up to date"] --> e2e
     test["Unit, integration and web app tests<br/>+ coverage thresholds"] --> e2e
     e2e["Build every image, start the stack,<br/>seed it, run end-to-end checks"] --> images
-    images["For each image: build, scan (Trivy),<br/>publish on main with SBOM + provenance"]
+    images["For each image: build, scan (Trivy),<br/>publish on main with SBOM + provenance"] --> deploy
+    deploy["On main: commit the new image tag<br/>for Argo CD to deploy"]
 ```
 
 - **Quality and tests run in parallel**; the end-to-end job only runs if both pass.
@@ -427,6 +429,63 @@ for example:
 | `bookService.autoscaling` | 2 to 5 replicas at 70% CPU                                                 |
 | `networkPolicies.enabled` | `true`                                                                     |
 
+### GitOps with Argo CD
+
+Instead of installing the chart with Helm yourself, [Argo CD](https://argo-cd.readthedocs.io)
+can run inside the cluster and deploy it **from this repository**. The repository then
+describes exactly what should run, and the cluster keeps itself matching it.
+
+```bash
+npm run k8s:up -- --gitops
+```
+
+This installs Argo CD (a pinned version) and the [Application](infra/argocd/application.yaml)
+that tells it what to deploy: the Helm chart from `main`, with the settings in
+[infra/environments/local/values.yaml](infra/environments/local/values.yaml), including
+the exact image build to run. If the cluster was installed with Helm before, the script
+hands it over to Argo CD and keeps MongoDB's data.
+
+**How a change reaches the cluster, with no deployment command:**
+
+```mermaid
+flowchart LR
+    push([Push to main]) --> ci["CI: tests, end-to-end,<br/>build + scan + publish<br/>sha-abc1234"]
+    ci --> commit["CI commits<br/>image.tag: sha-abc1234<br/>to infra/environments/local"]
+    commit --> argo["Argo CD notices<br/>(within ~3 minutes)"]
+    argo --> rollout["Rolling update,<br/>no downtime"]
+```
+
+- **Every deployment is a commit.** `git log infra/environments/local` is the full
+  deployment history, and each entry names the exact image build that ran.
+- **Rolling back is `git revert`** of a `deploy(local)` commit. Argo CD then rolls the
+  cluster back to the previous build.
+- **Self-healing.** If someone changes the cluster by hand (deletes a Deployment, scales
+  something), Argo CD puts it back within seconds. To change the cluster, change the
+  repository.
+- **Removed means removed.** Anything deleted from the chart is deleted from the cluster.
+- **Secrets stay out of Git.** The Secret with the signing key is created by the script
+  from `.env`, so Argo CD never sees it.
+- **Only the deploy job can write to the repository**, and only after all four images
+  have passed scanning and been published. One deployment runs at a time, so an older
+  build can never overwrite a newer one.
+
+Because CI adds a commit after each push to `main`, pull before pushing again
+(`git pull --rebase`), or your push will be rejected.
+
+To open the Argo CD dashboard:
+
+```bash
+kubectl port-forward service/argocd-server --namespace argocd 8089:443
+```
+
+Then go to https://localhost:8089 (your browser will warn about the self-signed
+certificate) and log in as `admin`. The password is in the `argocd-initial-admin-secret`
+Secret in the `argocd` namespace.
+
+_Right after a rollout, Argo CD may show "Degraded" for about a minute. That's the
+autoscalers waiting for their first CPU readings from the new pods, and it clears by
+itself._
+
 ### Known limitations
 
 - **Login rate limiting is per pod.** With 2 User Service pods, a client gets up to 10
@@ -568,6 +627,8 @@ library-platform/
 ├── infra/
 │   ├── helm/                # Helm chart for Kubernetes
 │   ├── k3d/                 # local Kubernetes cluster definition
+│   ├── argocd/              # Argo CD Application (what to deploy, from where)
+│   ├── environments/local/  # what the local cluster runs (updated by CI)
 │   └── terraform/           # cloud infrastructure (coming later in Phase 2)
 └── docs/adr/                # decision records
 ```
@@ -586,7 +647,7 @@ library-platform/
   - [x] CI with GitHub Actions: quality, tests, end-to-end, coverage thresholds
   - [x] Container images: vulnerability scanning, SBOM and provenance, published to GHCR
   - [x] Kubernetes with Helm (local cluster)
-  - [ ] GitOps with Argo CD
+  - [x] GitOps with Argo CD
   - [ ] Observability: Prometheus, Grafana, Loki, OpenTelemetry
   - [ ] Terraform and Azure (AKS)
 - [ ] **Phase 3: Data engineering.** Kafka events with the transactional outbox pattern, a
