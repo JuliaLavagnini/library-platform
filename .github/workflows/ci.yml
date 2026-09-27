@@ -6,6 +6,8 @@
 #   images   - builds each image, scans it with Trivy, and (on main only, once everything
 #              above has passed) publishes it to GitHub Container Registry with an SBOM and
 #              build provenance
+#   deploy   - on main only: commits the new image tag to infra/environments/local, so
+#              Argo CD deploys it (GitOps)
 #
 # Third-party actions are pinned to a commit SHA (with the version in a comment), so a
 # moved or compromised tag can't change what runs here.
@@ -18,7 +20,7 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Read-only by default. Only the images job gets more, and only what it needs.
+# Read-only by default. Only the images and deploy jobs get more, and only what they need.
 permissions:
   contents: read
 
@@ -227,3 +229,49 @@ jobs:
           sbom: true
           provenance: mode=max
           cache-from: type=gha,scope=${{ matrix.image.name }}
+
+  # GitOps: "deploying" is a commit that points the environment at the new build. Argo CD
+  # notices the commit and rolls it out. Rolling back = reverting that commit.
+  deploy:
+    name: Deploy (point the local environment at this build)
+    runs-on: ubuntu-latest
+    needs: [images]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    timeout-minutes: 5
+    permissions:
+      contents: write # the only job allowed to push, and only this one file
+    # One deployment at a time; a newer push cancels older runs (see the top of this file),
+    # so an older build can never overwrite a newer tag.
+    concurrency:
+      group: deploy-local
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Commit the new image tag
+        env:
+          VALUES_FILE: infra/environments/local/values.yaml
+        run: |
+          # Same format as the image tags published above (type=sha,format=short).
+          tag="sha-${GITHUB_SHA::7}"
+          sed -i -E "s/^(  tag: ).*/\1${tag}/" "$VALUES_FILE"
+
+          if git diff --quiet; then
+            echo "The local environment already runs ${tag}."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --all --message "deploy(local): ${tag} [skip ci]"
+
+          # If someone pushed in the meantime, replay this commit on top and try again.
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "Deployed ${tag}: Argo CD will roll it out within a few minutes."
+              exit 0
+            fi
+            git pull --rebase
+          done
+          echo "::error::Couldn't push the new image tag after 3 attempts."
+          exit 1
