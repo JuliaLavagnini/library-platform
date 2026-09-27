@@ -1,0 +1,35 @@
+# Optional observability add-on for the Docker Compose stack: start it together with the
+# main file (npm run docker:up:observability) and open Grafana at http://localhost:3000.
+#
+# grafana/otel-lgtm bundles an OpenTelemetry Collector, Prometheus (metrics), Tempo
+# (traces), Loki (logs) and Grafana in one container. It's a development tool: fine on a
+# laptop, not a production setup.
+
+services:
+  otel-lgtm:
+    image: grafana/otel-lgtm:0.34.0
+    container_name: library-observability
+    restart: unless-stopped
+    ports:
+      # Grafana. Bound to localhost only: this image lets anyone in without a login.
+      - '127.0.0.1:3000:3000'
+    volumes:
+      # Our dashboards, loaded at startup (dashboards as code).
+      - ./observability/grafana/provisioning.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/library.yaml:ro
+      - ./observability/grafana/dashboards:/otel-lgtm/library-dashboards:ro
+
+  # Turn on OpenTelemetry in both services (see services/*/src/instrumentation.ts).
+  book-service:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4318
+      OTEL_SERVICE_NAME: book-service
+      # Use the stable names for HTTP metrics, e.g. http.server.request.duration.
+      OTEL_SEMCONV_STABILITY_OPT_IN: http
+      OTEL_METRIC_EXPORT_INTERVAL: '15000'
+
+  user-service:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4318
+      OTEL_SERVICE_NAME: user-service
+      OTEL_SEMCONV_STABILITY_OPT_IN: http
+      OTEL_METRIC_EXPORT_INTERVAL: '15000'

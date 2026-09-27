@@ -1,0 +1,9 @@
+# Tells Grafana to load the dashboards in observability/grafana/dashboards at startup.
+apiVersion: 1
+
+providers:
+  - name: Library platform
+    folder: Library platform
+    type: file
+    options:
+      path: /otel-lgtm/library-dashboards
