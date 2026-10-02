@@ -20,7 +20,7 @@ COPY frontend frontend
 RUN npm run build --workspace=@library/web
 
 # ---- runtime: static files served by nginx, as a non-root user ----
-FROM nginxinc/nginx-unprivileged:1.30-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 
 # Apply security fixes released since the base image was built, and remove curl: nginx
 # doesn't need it (the health check uses BusyBox wget), and every unneeded tool is one
